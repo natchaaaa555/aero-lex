@@ -211,3 +211,34 @@ with col_tbl:
         )
     else:
         st.warning("ไม่พบจุดความร้อนในแนวทิศทางลมช่วงเวลานี้ (หากต้องการทดสอบการสาธิต ให้ติ๊กเลือก 'ใช้จุดความร้อนจำลอง' ที่แถบด้านซ้าย)")
+# --- ตัวอย่างส่วนที่เพิ่มเข้าไปใน app.py เพื่อให้ผู้ใช้โหลดข้อมูลย้อนหลังจาก InfluxDB ---
+st.subheader("📥 ดาวน์โหลดข้อมูลตรวจวัดภาคพื้นดินย้อนหลัง (InfluxDB)")
+
+if st.button("เตรียมไฟล์ข้อมูลย้อนหลัง 7 วัน"):
+    try:
+        client = InfluxDBClient(url=influx_url, token=influx_token, org=influx_org)
+        query_api = client.query_api()
+        # ดึงข้อมูลย้อนหลัง 7 วันทั้งหมดและจัดให้อยู่ในรูปแบบตาราง (Pivot)
+        hist_query = f'''
+        from(bucket: "{influx_bucket}")
+          |> range(start: -7d)
+          |> filter(fn: (r) => r["_measurement"] == "ground_station")
+          |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+        '''
+        df_hist = query_api.query_data_frame(hist_query, org=influx_org)
+        client.close()
+        
+        if not df_hist.empty:
+            # เลือกเฉพาะคอลัมน์สำคัญ
+            cols = [c for c in ["_time", "station_id", "pm25", "wind_speed", "wind_dir"] if c in df_hist.columns]
+            csv_data = df_hist[cols].to_csv(index=False).encode("utf-8-sig")
+            st.download_button(
+                label="คลิกเพื่อดาวน์โหลดไฟล์ CSV (ข้อมูลย้อนหลัง 7 วัน)",
+                data=csv_data,
+                file_name=f"influxdb_history_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
+        else:
+            st.info("ยังไม่มีข้อมูลประวัติในฐานข้อมูล")
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")        
