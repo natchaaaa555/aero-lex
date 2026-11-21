@@ -7,6 +7,7 @@ import folium
 from streamlit_folium import st_folium
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS
+from geopy.geocoders import Nominatim
 from datetime import datetime, timezone
 import hashlib
 import random
@@ -15,27 +16,79 @@ st.set_page_config(page_title="ระบบคัดกรองและจั�
 st.title("ระบบคัดกรองและจัดอันดับพื้นที่ต้นกำเนิดมลพิษทางอากาศ")
 st.caption("บูรณาการข้อมูลตรวจวัดภาคพื้นดิน (InfluxDB) + ข้อมูลจุดความร้อนดาวเทียม (NASA FIRMS) + แบบจำลองเส้นทางมวลอากาศ")
 
-# --- ค่าเชื่อมต่อของคุณ (ใส่ไว้ให้พร้อมใช้งานทันที) ---
+# --- ค่าเชื่อมต่อฐานข้อมูลและ API ---
 DEFAULT_URL = "https://us-east-1-1.aws.cloud2.influxdata.com"
 DEFAULT_TOKEN = "KP7nnhAgAvxAfzfgh6xEIOKtvW859QsOzcqfvE-x9k81aduLdB6hWJ3l8fd0nODwvMgs5OdJqqLSZT2oRpl6RQ=="
 DEFAULT_ORG = "air_pollution_project"
 DEFAULT_BUCKET = "air_quality_data"
 DEFAULT_NASA_KEY = "9f142ebe06d50df4aeed0bc128f507c8"
 
-st.sidebar.header("1. ฐานข้อมูลภาคพื้นดิน (InfluxDB)")
+# เก็บค่าพิกัดไว้ใน Session State เพื่อให้เปลี่ยนค่าได้ทั้งจากการพิมพ์ค้นหาและการคลิกแผนที่
+if "lat" not in st.session_state:
+    st.session_state.lat = 18.2888
+if "lon" not in st.session_state:
+    st.session_state.lon = 99.4908
+if "place_name" not in st.session_state:
+    st.session_state.place_name = "อ.เมือง จ.ลำปาง (ค่าเริ่มต้น)"
+
+# --- แถบเมนูด้านซ้าย: เลือกสถานที่ ---
+st.sidebar.header("📍 1. เลือกสถานที่ตรวจวัด")
+
+# ตัวเลือกสถานที่สำเร็จรูป
+preset_locations = {
+    "กำหนดเอง / ค้นหาด้านล่าง": None,
+    "อ.เมือง จ.ลำปาง": (18.2888, 99.4908),
+    "อ.แม่เมาะ จ.ลำปาง": (18.2936, 99.6517),
+    "รร.จุฬาภรณราชวิทยาลัย เชียงราย": (19.9575, 99.8825),
+    "อ.แม่สาย จ.เชียงราย": (20.4335, 99.8806),
+    "อ.เมือง จ.เชียงใหม่": (18.7883, 98.9853)
+}
+selected_preset = st.sidebar.selectbox("เลือกพื้นที่ด่วน:", list(preset_locations.keys()))
+if preset_locations[selected_preset] is not None:
+    st.session_state.lat, st.session_state.lon = preset_locations[selected_preset]
+    st.session_state.place_name = selected_preset
+
+# ช่องพิมพ์ค้นหาชื่อสถานที่
+search_query = st.sidebar.text_input("หรือพิมพ์ค้นหาชื่อสถานที่ / อำเภอ / จังหวัด:", placeholder="เช่น แม่ฟ้าหลวง เชียงราย")
+if st.sidebar.button("🔍 ค้นหาพิกัด"):
+    if search_query:
+        try:
+            geolocator = Nominatim(user_agent="aero_lex_student_project")
+            location = geolocator.geocode(search_query + " Thailand")
+            if location:
+                st.session_state.lat = round(location.latitude, 4)
+                st.session_state.lon = round(location.longitude, 4)
+                st.session_state.place_name = location.address
+                st.sidebar.success(f"พบพิกัด: {location.latitude:.4f}, {location.longitude:.4f}")
+            else:
+                st.sidebar.warning("ไม่พบสถานที่นี้ ลองระบุชื่ออำเภอหรือจังหวัดเพิ่มเติม")
+        except Exception as e:
+            st.sidebar.error(f"ค้นหาไม่สำเร็จ: {e}")
+
+target_lat = st.sidebar.number_input("ละติจูด (Latitude)", value=st.session_state.lat, format="%.4f")
+target_lon = st.sidebar.number_input("ลองจิจูด (Longitude)", value=st.session_state.lon, format="%.4f")
+st.session_state.lat = target_lat
+st.session_state.lon = target_lon
+
+# --- ตั้งค่ากรวยลม ---
+st.sidebar.header("🧭 2. แบบจำลองกรวยลม")
+cone_angle = st.sidebar.slider("มุมกวาดกรวยลม (องศา)", 30, 90, 60)
+back_hours = st.sidebar.slider("ระยะเวลาย้อนรอย (ชั่วโมง)", 1, 12, 4)
+
+# --- ตั้งค่าฐานข้อมูลและดาวเทียม ---
+st.sidebar.header("📡 3. ฐานข้อมูล & ดาวเทียม")
 influx_url = st.sidebar.text_input("InfluxDB URL", value=DEFAULT_URL)
 influx_token = st.sidebar.text_input("InfluxDB Token", value=DEFAULT_TOKEN, type="password")
 influx_org = st.sidebar.text_input("Organization", value=DEFAULT_ORG)
 influx_bucket = st.sidebar.text_input("Bucket", value=DEFAULT_BUCKET)
 
-# ปุ่มจำลองการส่งข้อมูลจากสถานีภาคสนามเข้า InfluxDB
-if st.sidebar.button("📡 จำลองส่งข้อมูลจากสถานีเข้า InfluxDB"):
+if st.sidebar.button("📤 จำลองส่งข้อมูลจากสถานีเข้า InfluxDB"):
     try:
         client = InfluxDBClient(url=influx_url, token=influx_token, org=influx_org)
         write_api = client.write_api(write_options=SYNCHRONOUS)
         point = (
             Point("ground_station")
-            .tag("station_id", "LP-01")
+            .tag("station_id", "CUSTOM-01")
             .field("pm25", round(random.uniform(75.0, 125.0), 1))
             .field("wind_speed", round(random.uniform(10.0, 22.0), 1))
             .field("wind_dir", round(random.uniform(180.0, 270.0), 1))
@@ -47,17 +100,10 @@ if st.sidebar.button("📡 จำลองส่งข้อมูลจาก�
     except Exception as e:
         st.sidebar.error(f"ส่งข้อมูลไม่สำเร็จ: {e}")
 
-st.sidebar.header("2. ข้อมูลจุดความร้อน (NASA FIRMS)")
 nasa_key = st.sidebar.text_input("NASA MAP_KEY", value=DEFAULT_NASA_KEY, type="password")
-use_mock_hs = st.sidebar.checkbox("ใช้จุดความร้อนจำลอง (กรณีวันนี้ไม่มีจุดเผาจริงในพื้นที่)", value=False)
+use_mock_hs = st.sidebar.checkbox("ใช้จุดความร้อนจำลอง (สำหรับสาธิต)", value=False)
 
-st.sidebar.header("3. พิกัดสถานี & แบบจำลองกรวยลม")
-target_lat = st.sidebar.number_input("ละติจูด (Latitude)", value=18.2888, format="%.4f")
-target_lon = st.sidebar.number_input("ลองจิจูด (Longitude)", value=99.4908, format="%.4f")
-cone_angle = st.sidebar.slider("มุมกวาดกรวยลม (องศา)", 30, 90, 60)
-back_hours = st.sidebar.slider("ระยะเวลาย้อนรอย (ชั่วโมง)", 1, 12, 4)
-
-# --- ดึงข้อมูลจาก InfluxDB ---
+# --- ฟังก์ชันดึงข้อมูล ---
 def fetch_ground_data(url, token, org, bucket):
     try:
         client = InfluxDBClient(url=url, token=token, org=org)
@@ -90,7 +136,6 @@ def fetch_ground_data(url, token, org, bucket):
         "wind_dir": 225.0
     }
 
-# --- ดึงข้อมูลจุดความร้อน ---
 def fetch_hotspots(lat, lon, api_key, force_mock):
     if api_key and not force_mock:
         try:
@@ -104,10 +149,10 @@ def fetch_hotspots(lat, lon, api_key, force_mock):
                 if not df.empty:
                     return df[["latitude", "longitude", "frp"]], "NASA FIRMS VIIRS (ข้อมูลจริงจากดาวเทียม)"
                 else:
-                    return pd.DataFrame(columns=["latitude", "longitude", "frp"]), "NASA FIRMS VIIRS (วันนี้ไม่พบจุดความร้อนจริงในพื้นที่)"
+                    return pd.DataFrame(columns=["latitude", "longitude", "frp"]), "NASA FIRMS VIIRS (ไม่พบจุดความร้อนจริงในพื้นที่นี้)"
         except Exception:
             pass
-    np.random.seed(42)
+    np.random.seed(int(abs(lat * 100)))
     lats = lat + np.random.uniform(-0.35, 0.35, 18)
     lons = lon + np.random.uniform(-0.35, 0.35, 18)
     frp = np.random.uniform(8.0, 50.0, 18)
@@ -116,8 +161,7 @@ def fetch_hotspots(lat, lon, api_key, force_mock):
 ground = fetch_ground_data(influx_url, influx_token, influx_org, influx_bucket)
 hotspots_df, hs_source = fetch_hotspots(target_lat, target_lon, nasa_key, use_mock_hs)
 
-st.sidebar.info(f"📊 {ground['source']}")
-st.sidebar.info(f"🛰️ {hs_source}")
+st.info(f"📌 **พื้นที่ที่กำลังวิเคราะห์:** {st.session_state.place_name} (`{target_lat:.4f}, {target_lon:.4f}`) | 🛰️ **แหล่งจุดความร้อน:** {hs_source}")
 
 # --- คำนวณกรวยลมและจัดอันดับ ---
 upwind_bearing = ground["wind_dir"] % 360
@@ -170,7 +214,7 @@ st.divider()
 col_map, col_tbl = st.columns([1.2, 1])
 
 with col_map:
-    st.subheader("แผนที่จำลองเส้นทางมวลอากาศย้อนกลับ")
+    st.subheader("แผนที่จำลองเส้นทางมวลอากาศ (คลิกบนแผนที่เพื่อย้ายจุดได้)")
     m = folium.Map(location=[target_lat, target_lon], zoom_start=10)
     folium.Marker([target_lat, target_lon], popup="จุดตรวจวัด / ผู้รับผลกระทบ", icon=folium.Icon(color="blue", icon="home")).add_to(m)
     
@@ -192,7 +236,17 @@ with col_map:
                 fill=True, fill_opacity=0.9,
                 popup=f"{r['รหัสจุด']} | ระยะ: {r['ระยะห่าง (กม.)']} กม. | คะแนน: {r['คะแนนความน่าจะเป็น']}"
             ).add_to(m)
-    st_folium(m, width=650, height=450)
+            
+    # รับค่าพิกัดเมื่อผู้ใช้คลิกบนแผนที่
+    map_data = st_folium(m, width=650, height=450)
+    if map_data and map_data.get("last_clicked"):
+        clicked_lat = round(map_data["last_clicked"]["lat"], 4)
+        clicked_lon = round(map_data["last_clicked"]["lng"], 4)
+        if clicked_lat != st.session_state.lat or clicked_lon != st.session_state.lon:
+            st.session_state.lat = clicked_lat
+            st.session_state.lon = clicked_lon
+            st.session_state.place_name = "พิกัดที่เลือกจากแผนที่"
+            st.rerun()
 
 with col_tbl:
     st.subheader("ตารางจัดอันดับพื้นที่ต้นกำเนิดที่เป็นไปได้")
@@ -204,21 +258,20 @@ with col_tbl:
         st.success(f"**รหัสรับรองความถูกต้องของข้อมูล (SHA-256):**\n`{hash_val}`")
         
         st.download_button(
-            label="ดาวน์โหลดรายงานจัดอันดับ (CSV)",
+            label="📥 ดาวน์โหลดรายงานจัดอันดับ (CSV)",
             data=suspect_df.to_csv().encode("utf-8-sig"),
             file_name=f"source_ranking_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv"
         )
     else:
         st.warning("ไม่พบจุดความร้อนในแนวทิศทางลมช่วงเวลานี้ (หากต้องการทดสอบการสาธิต ให้ติ๊กเลือก 'ใช้จุดความร้อนจำลอง' ที่แถบด้านซ้าย)")
-# --- ตัวอย่างส่วนที่เพิ่มเข้าไปใน app.py เพื่อให้ผู้ใช้โหลดข้อมูลย้อนหลังจาก InfluxDB ---
-st.subheader("📥 ดาวน์โหลดข้อมูลตรวจวัดภาคพื้นดินย้อนหลัง (InfluxDB)")
 
-if st.button("เตรียมไฟล์ข้อมูลย้อนหลัง 7 วัน"):
+st.divider()
+st.subheader("🗄️ ดาวน์โหลดประวัติข้อมูลตรวจวัดภาคพื้นดิน (InfluxDB)")
+if st.button("เตรียมไฟล์ประวัติข้อมูลย้อนหลัง 7 วัน"):
     try:
         client = InfluxDBClient(url=influx_url, token=influx_token, org=influx_org)
         query_api = client.query_api()
-        # ดึงข้อมูลย้อนหลัง 7 วันทั้งหมดและจัดให้อยู่ในรูปแบบตาราง (Pivot)
         hist_query = f'''
         from(bucket: "{influx_bucket}")
           |> range(start: -7d)
@@ -227,18 +280,15 @@ if st.button("เตรียมไฟล์ข้อมูลย้อนหล
         '''
         df_hist = query_api.query_data_frame(hist_query, org=influx_org)
         client.close()
-        
         if not df_hist.empty:
-            # เลือกเฉพาะคอลัมน์สำคัญ
             cols = [c for c in ["_time", "station_id", "pm25", "wind_speed", "wind_dir"] if c in df_hist.columns]
-            csv_data = df_hist[cols].to_csv(index=False).encode("utf-8-sig")
             st.download_button(
-                label="คลิกเพื่อดาวน์โหลดไฟล์ CSV (ข้อมูลย้อนหลัง 7 วัน)",
-                data=csv_data,
+                label="คลิกเพื่อดาวน์โหลดไฟล์ CSV (ข้อมูลจาก InfluxDB)",
+                data=df_hist[cols].to_csv(index=False).encode("utf-8-sig"),
                 file_name=f"influxdb_history_{datetime.now().strftime('%Y%m%d')}.csv",
                 mime="text/csv"
             )
         else:
-            st.info("ยังไม่มีข้อมูลประวัติในฐานข้อมูล")
+            st.info("ยังไม่มีข้อมูลประวัติในฐานข้อมูล กดปุ่มส่งข้อมูลด้านซ้ายเพื่อสร้างข้อมูลตัวอย่างก่อนได้ครับ")
     except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")        
+        st.error(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
