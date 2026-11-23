@@ -101,7 +101,7 @@ search_query = st.sidebar.text_input("สืบค้นพิกัดภูม
 if st.sidebar.button("สืบค้นพิกัดภูมิศาสตร์"):
     if search_query:
         try:
-            geolocator = Nominatim(user_agent="aero_lex_academic_v3")
+            geolocator = Nominatim(user_agent="aero_lex_academic_v4")
             location = geolocator.geocode(search_query + " Thailand")
             if location:
                 st.session_state.lat = round(location.latitude, 4)
@@ -330,12 +330,43 @@ col_map, col_tbl = st.columns([1.15, 1.15])
 
 with col_map:
     st.subheader("2. แบบจำลองเชิงพื้นที่และการแพร่กระจายของกลุ่มควัน")
-    m = folium.Map(
-        location=[target_lat, target_lon],
-        zoom_start=10,
+    m = folium.Map(location=[target_lat, target_lon], zoom_start=11, tiles=None)
+    
+    # ชั้นที่ 1: ภาพถ่ายดาวเทียมความละเอียดสูง (ค่าเริ่มต้น)
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri World Imagery",
+        name="ภาพถ่ายดาวเทียม (Satellite)",
+        overlay=False,
+        control=True
+    ).add_to(m)
+    
+    # ซ้อนป้ายชื่อสถานที่และถนนบนภาพถ่ายดาวเทียม (Hybrid Labels)
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri Labels",
+        name="ป้ายชื่อสถานที่และขอบเขตอำเภอ",
+        overlay=True,
+        control=True
+    ).add_to(m)
+
+    # ชั้นที่ 2: แผนที่ถนนและสถานที่ละเอียด (OpenStreetMap)
+    folium.TileLayer(
+        tiles="OpenStreetMap",
+        name="แผนที่ถนนละเอียด (Street Map)",
+        overlay=False,
+        control=True
+    ).add_to(m)
+
+    # ชั้นที่ 3: แผนที่ภูมิประเทศและเส้นชั้นความสูง (Topographic)
+    folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri WorldTopoMap"
-    )
+        attr="Esri Topographic",
+        name="แผนที่ภูมิประเทศ (Topographic)",
+        overlay=False,
+        control=True
+    ).add_to(m)
+
     folium.Marker(
         [target_lat, target_lon],
         popup="สถานีตรวจวัดภาคพื้นดิน (Receptor)",
@@ -349,23 +380,26 @@ with col_map:
         d_lon = (max_radius_km / (111.32 * np.cos(np.radians(target_lat)))) * np.sin(rad)
         cone_pts.append([target_lat + d_lat, target_lon + d_lon])
     cone_pts.append([target_lat, target_lon])
-    folium.Polygon(locations=cone_pts, color="#B7791F", weight=1.5, fill=True, fill_opacity=0.2).add_to(m)
+    folium.Polygon(locations=cone_pts, color="#F6AD55", weight=2, fill=True, fill_opacity=0.25).add_to(m)
     
     if not res_df.empty:
         for _, r in res_df.iterrows():
             is_active = r["ความเข้มข้นทำนาย (µg/m³)"] > 0.05
             is_blocked = "ขวางกั้น" in r["สภาพภูมิประเทศ"]
-            color = "#C53030" if is_active else ("#6B46C1" if is_blocked else "#718096")
+            color = "#FF2A2A" if is_active else ("#9F7AEA" if is_blocked else "#CBD5E0")
             folium.CircleMarker(
                 location=[r["ละติจูด (°N)"], r["ลองจิจูด (°E)"]],
-                radius=7 if is_active else 4.5,
+                radius=7.5 if is_active else 5,
                 color=color,
-                fill=True, fill_opacity=0.85,
+                fill=True, fill_opacity=0.9,
                 popup=f"{r['รหัสจุดความร้อน']} | C_pred: {r['ความเข้มข้นทำนาย (µg/m³)']} µg/m³ | {r['สภาพภูมิประเทศ']}"
             ).add_to(m)
+
+    # เพิ่มปุ่มสลับชั้นแผนที่ที่มุมขวาบน
+    folium.LayerControl(position="topright").add_to(m)
             
     map_data = st_folium(m, width=620, height=440)
-    st.caption("ภาพที่ 1: การกระจายตัวเชิงพื้นที่ของจุดความร้อน (สีแดง: แหล่งกำเนิดที่มีผลกระทบ, สีม่วง: ถูกแนวเขาขวางกั้น, สีเทา: นอกแนวกระแสลม) คลิกบนแผนที่เพื่อกำหนดพิกัดจุดตรวจวัดใหม่")
+    st.caption("ภาพที่ 1: การกระจายตัวเชิงพื้นที่บนภาพถ่ายดาวเทียมความละเอียดสูง (สามารถกดปุ่มมุมขวาบนของแผนที่เพื่อสลับเป็นแผนที่ถนนหรือภูมิประเทศได้)")
     if map_data and map_data.get("last_clicked"):
         clicked_lat = round(map_data["last_clicked"]["lat"], 4)
         clicked_lon = round(map_data["last_clicked"]["lng"], 4)
