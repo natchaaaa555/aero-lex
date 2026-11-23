@@ -149,7 +149,7 @@ st.markdown("""
 # --- ส่วนหัวเอกสารวิชาการ ---
 st.markdown("""
 <div class="research-header">
-    <div class="research-meta">ATMOSPHERIC PHYSICS & ENVIRONMENTAL FORENSICS MODEL | VERSION 2.4 (GAUSSIAN-BRIGGS-DEM)</div>
+    <div class="research-meta">ATMOSPHERIC PHYSICS & ENVIRONMENTAL FORENSICS MODEL | VERSION 2.5 (GAUSSIAN-BRIGGS-DEM)</div>
     <div class="research-title">แบบจำลองทางฟิสิกส์บรรยากาศเพื่อการคัดกรองและระบุแหล่งกำเนิดฝุ่นละอองขนาดเล็ก (PM2.5)</div>
 </div>
 <div class="abstract-box">
@@ -171,6 +171,27 @@ if "lon" not in st.session_state:
 if "place_name" not in st.session_state:
     st.session_state.place_name = "อำเภอเมืองลำปาง จังหวัดลำปาง (แอ่งกระทะลำปาง)"
 
+# --- ฟังก์ชันช่วยแปลข้อมูลทางวิชาการ ---
+def degree_to_thai_dir(deg):
+    dirs = [
+        "ทิศเหนือ (N)", "ทิศตะวันออกเฉียงเหนือ (NE)", "ทิศตะวันออก (E)", "ทิศตะวันออกเฉียงใต้ (SE)",
+        "ทิศใต้ (S)", "ทิศตะวันตกเฉียงใต้ (SW)", "ทิศตะวันตก (W)", "ทิศตะวันตกเฉียงเหนือ (NW)"
+    ]
+    idx = int((deg + 22.5) // 45) % 8
+    return f"{dirs[idx]} ({deg}°)"
+
+def classify_pm25_thai(val):
+    if val <= 15.0:
+        return "ดีมาก (สีฟ้า)"
+    elif val <= 25.0:
+        return "ดี (สีเขียว)"
+    elif val <= 37.5:
+        return "ปานกลาง (สีเหลือง)"
+    elif val <= 75.0:
+        return "เริ่มมีผลกระทบต่อสุขภาพ (สีส้ม)"
+    else:
+        return "มีผลกระทบต่อสุขภาพ (สีแดง)"
+
 # --- แถบควบคุมพารามิเตอร์ (Sidebar) ---
 st.sidebar.markdown("### 1. กำหนดพิกัดจุดรับผลกระทบ (Receptor)")
 preset_locations = {
@@ -190,7 +211,7 @@ search_query = st.sidebar.text_input("สืบค้นพิกัดภูม
 if st.sidebar.button("สืบค้นพิกัด"):
     if search_query:
         try:
-            geolocator = Nominatim(user_agent="aero_lex_academic_v8")
+            geolocator = Nominatim(user_agent="aero_lex_academic_v9")
             location = geolocator.geocode(search_query + " Thailand")
             if location:
                 st.session_state.lat = round(location.latitude, 4)
@@ -448,9 +469,9 @@ rel_error = round(abs(ground["pm25"] - total_predicted_pm25) / max(ground["pm25"
 # --- สรุปค่าพารามิเตอร์หลัก ---
 st.subheader("1. ค่าพารามิเตอร์ทางอุตุนิยมวิทยาและผลลัพธ์เชิงปริมาณ")
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("ความเข้มข้นตรวจวัดจริง (C_obs)", f"{ground['pm25']} µg/m³")
+c1.metric("ความเข้มข้นตรวจวัดจริง (C_obs)", f"{ground['pm25']} µg/m³", classify_pm25_thai(ground['pm25']))
 c2.metric("ความเข้มข้นเชิงทำนายรวม (C_pred)", f"{total_predicted_pm25} µg/m³", f"ความคลาดเคลื่อนสัมพัทธ์ {rel_error}%")
-c3.metric("เวกเตอร์ลมต้นทาง (Wind Vector)", f"{ground['wind_speed']} km/h", f"มุมทิศ {upwind_bearing}° (Class {stab_code})")
+c3.metric("เวกเตอร์ลมต้นทาง (Wind Vector)", f"{ground['wind_speed']} km/h", degree_to_thai_dir(upwind_bearing))
 c4.metric("แหล่งกำเนิดที่มีนัยสำคัญ", f"{len(suspect_df)} จุด", f"รัศมีขอบเขต {max_radius_km} km")
 
 col_map, col_tbl = st.columns([1.15, 1.15])
@@ -540,9 +561,10 @@ with col_tbl:
         hash_val = hashlib.sha256(raw_str.encode()).hexdigest()
         st.markdown(f"<div style='background:#F8FAFC; border:1px solid #CBD5E1; padding:0.75rem; font-size:1.1rem; margin-bottom:0.75rem;'><strong>รหัสตรวจสอบความถูกต้องของข้อมูล (SHA-256 Checksum):</strong><br><code>{hash_val}</code></div>", unsafe_allow_html=True)
         
+        csv_suspect = "sep=,\n" + suspect_df.to_csv()
         st.download_button(
-            label="ส่งออกตารางผลการวิเคราะห์ (CSV)",
-            data=suspect_df.to_csv().encode("utf-8-sig"),
+            label="ส่งออกตารางผลการวิเคราะห์ (Excel CSV)",
+            data=csv_suspect.encode("utf-8-sig"),
             file_name=f"aerolex_quantitative_report_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv"
         )
@@ -562,7 +584,7 @@ st.markdown(r"""
 """)
 
 st.subheader("5. คลังข้อมูลอนุกรมเวลาภาคพื้นดิน (InfluxDB Time-Series Archive)")
-if st.button("สืบค้นชุดข้อมูลอนุกรมเวลาย้อนหลัง 7 วัน"):
+if st.button("ประมวลผลและแปลความหมายข้อมูลอนุกรมเวลาย้อนหลัง 7 วัน"):
     try:
         client = InfluxDBClient(url=influx_url, token=influx_token, org=influx_org)
         query_api = client.query_api()
@@ -575,11 +597,30 @@ if st.button("สืบค้นชุดข้อมูลอนุกรมเ
         df_hist = query_api.query_data_frame(hist_query, org=influx_org)
         client.close()
         if not df_hist.empty:
-            cols = [c for c in ["_time", "station_id", "pm25", "wind_speed", "wind_dir"] if c in df_hist.columns]
+            df_hist["วัน-เวลา (เวลาประเทศไทย)"] = pd.to_datetime(df_hist["_time"]).dt.tz_convert("Asia/Bangkok").dt.strftime("%Y-%m-%d %H:%M:%S")
+            df_hist["รหัสสถานีตรวจวัด"] = df_hist.get("station_id", "N/A")
+            df_hist["ความเข้มข้น PM2.5 (µg/m³)"] = df_hist["pm25"].round(1)
+            df_hist["เกณฑ์คุณภาพอากาศ (กรมควบคุมมลพิษ)"] = df_hist["pm25"].apply(classify_pm25_thai)
+            df_hist["ความเร็วลม (km/h)"] = df_hist["wind_speed"].round(1)
+            df_hist["ทิศทางลมต้นทาง"] = df_hist["wind_dir"].apply(degree_to_thai_dir)
+
+            export_cols = [
+                "วัน-เวลา (เวลาประเทศไทย)",
+                "รหัสสถานีตรวจวัด",
+                "ความเข้มข้น PM2.5 (µg/m³)",
+                "เกณฑ์คุณภาพอากาศ (กรมควบคุมมลพิษ)",
+                "ความเร็วลม (km/h)",
+                "ทิศทางลมต้นทาง"
+            ]
+            df_clean = df_hist[export_cols].sort_values(by="วัน-เวลา (เวลาประเทศไทย)", ascending=False)
+            
+            st.dataframe(df_clean, use_container_width=True)
+            
+            csv_output = "sep=,\n" + df_clean.to_csv(index=False)
             st.download_button(
-                label="ดาวน์โหลดชุดข้อมูลอนุกรมเวลา (CSV)",
-                data=df_hist[cols].to_csv(index=False).encode("utf-8-sig"),
-                file_name=f"influxdb_timeseries_{datetime.now().strftime('%Y%m%d')}.csv",
+                label="ดาวน์โหลดรายงานข้อมูลที่แปลผลแล้ว (Excel CSV)",
+                data=csv_output.encode("utf-8-sig"),
+                file_name=f"aerolex_interpreted_data_{datetime.now().strftime('%Y%m%d')}.csv",
                 mime="text/csv"
             )
         else:
