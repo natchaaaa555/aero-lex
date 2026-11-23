@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 import hashlib
 
 st.set_page_config(
-    page_title="Aero-Lex | แบบจำลองฟิสิกส์บรรยากาศเพื่อระบุแหล่งกำเนิด PM2.5",
+    page_title="Aero-Lex Thailand | แบบจำลองฟิสิกส์บรรยากาศเพื่อระบุแหล่งกำเนิด PM2.5 ระดับประเทศ",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -142,11 +142,11 @@ st.markdown("""
 # --- ส่วนหัวเอกสารวิชาการ ---
 st.markdown("""
 <div class="research-header">
-    <div class="research-meta">ATMOSPHERIC PHYSICS & ENVIRONMENTAL FORENSICS MODEL | VERSION 2.6 (REAL-TIME SATELLITE VIIRS)</div>
-    <div class="research-title">แบบจำลองทางฟิสิกส์บรรยากาศเพื่อการคัดกรองและระบุแหล่งกำเนิดฝุ่นละอองขนาดเล็ก (PM2.5)</div>
+    <div class="research-meta">ATMOSPHERIC PHYSICS & ENVIRONMENTAL FORENSICS MODEL | THAILAND NATIONAL SCALE (VERSION 3.0)</div>
+    <div class="research-title">แบบจำลองทางฟิสิกส์บรรยากาศเพื่อการคัดกรองและระบุแหล่งกำเนิดฝุ่นละอองขนาดเล็ก (PM2.5) ระดับประเทศ</div>
 </div>
 <div class="abstract-box">
-    <strong>หลักการและกรอบแนวคิดเชิงทฤษฎี:</strong> ระบบประมวลผลเชิงปริมาณสำหรับวิเคราะห์การเคลื่อนที่และแพร่กระจายของอนุภาคฝุ่นละอองขนาดเล็กในชั้นบรรยากาศระดับล่าง (Atmospheric Boundary Layer) โดยบูรณาการข้อมูลอุตุนิยมวิทยาและคุณภาพอากาศจากระบบตรวจวัดเวลาจริง (Open-Meteo API & InfluxDB) ร่วมกับข้อมูลการแผ่รังสีความร้อนจากดาวเทียม (NASA FIRMS VIIRS 375m) คำนวณผ่านสมการการแพร่กระจายแบบเกาส์เซียน (Gaussian Plume Dispersion Model) สมการแรงลอยตัวทางความร้อนของบริกส์ (Briggs' Plume Rise) และเกณฑ์การขวางกั้นทางภูมิประเทศจากแบบจำลองระดับความสูงเชิงเลข (DEM Orographic Blocking)
+    <strong>หลักการและกรอบแนวคิดเชิงทฤษฎี:</strong> ระบบประมวลผลเชิงปริมาณครอบคลุมพื้นที่ประเทศไทยสำหรับวิเคราะห์การเคลื่อนที่และแพร่กระจายของอนุภาคฝุ่นละอองขนาดเล็กในชั้นบรรยากาศระดับล่าง (Atmospheric Boundary Layer) โดยบูรณาการข้อมูลอุตุนิยมวิทยาและคุณภาพอากาศจากระบบตรวจวัดเวลาจริง (Open-Meteo API & InfluxDB) ร่วมกับข้อมูลการแผ่รังสีความร้อนจากดาวเทียม (NASA FIRMS VIIRS 375m) คำนวณผ่านสมการการแพร่กระจายแบบเกาส์เซียน (Gaussian Plume Dispersion Model) สมการแรงลอยตัวทางความร้อนของบริกส์ (Briggs' Plume Rise) และเกณฑ์การขวางกั้นทางภูมิประเทศจากแบบจำลองระดับความสูงเชิงเลข (DEM Orographic Blocking)
 </div>
 """, unsafe_allow_html=True)
 
@@ -157,14 +157,67 @@ DEFAULT_ORG = "air_pollution_project"
 DEFAULT_BUCKET = "air_quality_data"
 DEFAULT_NASA_KEY = "9f142ebe06d50df4aeed0bc128f507c8"
 
+# ตั้งค่าเริ่มต้นให้อยู่จุดกึ่งกลางประเทศไทย (ภาคกลางตอนบน) และซูมเห็นทั้งประเทศ
 if "lat" not in st.session_state:
-    st.session_state.lat = 18.2888
+    st.session_state.lat = 15.8700
 if "lon" not in st.session_state:
-    st.session_state.lon = 99.4908
+    st.session_state.lon = 100.9925
 if "place_name" not in st.session_state:
-    st.session_state.place_name = "อำเภอเมืองลำปาง จังหวัดลำปาง (แอ่งกระทะลำปาง)"
+    st.session_state.place_name = "ประเทศไทย (จุดอ้างอิงกึ่งกลางประเทศ — คลิกบนแผนที่เพื่อเลือกจังหวัดที่ต้องการวิเคราะห์)"
+if "zoom_level" not in st.session_state:
+    st.session_state.zoom_level = 6
 
-# --- ฟังก์ชันช่วยแปลข้อมูลทางวิชาการ ---
+# --- ฟังก์ชันแปลงพิกัดเป็นชื่อสถานที่อ้างอิง ---
+@st.cache_data(ttl=86400)
+def reverse_geocode_landmark(lat, lon):
+    try:
+        url = f"https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={lat}&lon={lon}&accept-language=th"
+        headers = {"User-Agent": "AeroLex_Thailand_Research/1.0"}
+        resp = requests.get(url, headers=headers, timeout=3)
+        if resp.status_code == 200:
+            data = resp.json()
+            addr = data.get("address", {})
+            poi = addr.get("amenity") or addr.get("shop") or addr.get("building") or addr.get("tourism") or addr.get("road") or addr.get("village") or addr.get("hamlet")
+            subdistrict = addr.get("subdistrict") or addr.get("quarter") or addr.get("suburb") or ""
+            district = addr.get("district") or addr.get("county") or addr.get("city") or ""
+            province = addr.get("province") or addr.get("state") or ""
+            
+            parts = []
+            if poi:
+                parts.append(f"บริเวณใกล้เคียง {poi}")
+            if subdistrict:
+                parts.append(subdistrict)
+            if district:
+                parts.append(district)
+            if province and province not in district:
+                parts.append(province)
+                
+            if parts:
+                return " ".join(parts)
+            disp = data.get("display_name", "")
+            if disp:
+                return ", ".join(disp.split(",")[:3])
+    except Exception:
+        pass
+    return f"พิกัด ({lat:.4f}, {lon:.4f})"
+
+def parse_station_to_location(st_id):
+    st_str = str(st_id)
+    if st_str == "LP-01":
+        return "สถานีตรวจวัดหลัก อ.เมืองลำปาง (18.2888, 99.4908)", "https://www.google.com/maps?q=18.2888,99.4908"
+    elif st_str == "CUSTOM-01":
+        return "จุดตรวจวัดภาคสนามกำหนดเอง (18.2888, 99.4908)", "https://www.google.com/maps?q=18.2888,99.4908"
+    elif st_str.startswith("ST-"):
+        try:
+            parts = st_str.split("-")
+            lat_v = float(parts[1])
+            lon_v = float(parts[2])
+            place = reverse_geocode_landmark(lat_v, lon_v)
+            return place, f"https://www.google.com/maps?q={lat_v},{lon_v}"
+        except Exception:
+            pass
+    return f"รหัสสถานี {st_str}", "https://www.google.com/maps"
+
 def degree_to_thai_dir(deg):
     dirs = [
         "ทิศเหนือ (N)", "ทิศตะวันออกเฉียงเหนือ (NE)", "ทิศตะวันออก (E)", "ทิศตะวันออกเฉียงใต้ (SE)",
@@ -186,35 +239,39 @@ def classify_pm25_thai(val):
         return "มีผลกระทบต่อสุขภาพ (สีแดง)"
 
 # --- แถบควบคุมพารามิเตอร์ (Sidebar) ---
-st.sidebar.markdown("### 1. กำหนดพิกัดจุดรับผลกระทบ (Receptor)")
+st.sidebar.markdown("### 1. กำหนดพื้นที่ศึกษาในประเทศไทย")
 preset_locations = {
-    "กำหนดพิกัดเอง / สืบค้นด้านล่าง": None,
-    "อำเภอเมืองลำปาง จังหวัดลำปาง": (18.2888, 99.4908),
-    "อำเภอแม่เมาะ จังหวัดลำปาง": (18.2936, 99.6517),
-    "โรงเรียนวิทยาศาสตร์จุฬาภรณราชวิทยาลัย เชียงราย": (19.9575, 99.8825),
-    "อำเภอแม่สาย จังหวัดเชียงราย": (20.4335, 99.8806),
-    "อำเภอเมืองเชียงใหม่ จังหวัดเชียงใหม่": (18.7883, 98.9853)
+    "ประเทศไทย (ภาพรวมทั้งประเทศ)": (15.8700, 100.9925, 6),
+    "กรุงเทพมหานคร (ภาคกลาง)": (13.7563, 100.5018, 10),
+    "จังหวัดเชียงใหม่ (ภาคเหนือ)": (18.7883, 98.9853, 10),
+    "จังหวัดเชียงราย (ภาคเหนือ)": (19.9105, 99.8406, 10),
+    "จังหวัดลำปาง (ภาคเหนือ)": (18.2888, 99.4908, 10),
+    "จังหวัดขอนแก่น (ภาคตะวันออกเฉียงเหนือ)": (16.4322, 102.8236, 10),
+    "จังหวัดนครราชสีมา (ภาคตะวันออกเฉียงเหนือ)": (14.9799, 102.0978, 10),
+    "จังหวัดระยอง (ภาคตะวันออก)": (12.6814, 101.2816, 10),
+    "จังหวัดสงขลา (ภาคใต้)": (7.1898, 100.5954, 10)
 }
-selected_preset = st.sidebar.selectbox("สถานีอ้างอิงในพื้นที่ศึกษา:", list(preset_locations.keys()))
-if preset_locations[selected_preset] is not None:
-    st.session_state.lat, st.session_state.lon = preset_locations[selected_preset]
+selected_preset = st.sidebar.selectbox("เลือกภูมิภาค / จังหวัดตัวแทน:", list(preset_locations.keys()))
+if st.sidebar.button("ไปยังพื้นที่ที่เลือก"):
+    st.session_state.lat, st.session_state.lon, st.session_state.zoom_level = preset_locations[selected_preset]
     st.session_state.place_name = selected_preset
 
-search_query = st.sidebar.text_input("สืบค้นพิกัดภูมิศาสตร์ (ชื่อสถานที่ / อำเภอ / จังหวัด):", placeholder="ระบุชื่อพื้นที่ศึกษา")
+search_query = st.sidebar.text_input("สืบค้นสถานที่ทั่วประเทศ (จังหวัด / อำเภอ / ตำบล):", placeholder="เช่น ปากช่อง นครราชสีมา")
 if st.sidebar.button("สืบค้นพิกัด"):
     if search_query:
         try:
-            geolocator = Nominatim(user_agent="aero_lex_academic_v10")
+            geolocator = Nominatim(user_agent="aero_lex_thailand_v13")
             location = geolocator.geocode(search_query + " Thailand")
             if location:
                 st.session_state.lat = round(location.latitude, 4)
                 st.session_state.lon = round(location.longitude, 4)
                 st.session_state.place_name = location.address
+                st.session_state.zoom_level = 11
         except Exception as e:
             st.sidebar.error(f"ข้อผิดพลาดในการสืบค้นพิกัด: {e}")
 
-target_lat = st.sidebar.number_input("ละติจูด (Latitude, °N)", value=st.session_state.lat, format="%.4f")
-target_lon = st.sidebar.number_input("ลองจิจูด (Longitude, °E)", value=st.session_state.lon, format="%.4f")
+target_lat = st.sidebar.number_input("ละติจูดจุดรับผลกระทบ (Latitude, °N)", value=st.session_state.lat, format="%.4f")
+target_lon = st.sidebar.number_input("ลองจิจูดจุดรับผลกระทบ (Longitude, °E)", value=st.session_state.lon, format="%.4f")
 st.session_state.lat = target_lat
 st.session_state.lon = target_lon
 
@@ -234,7 +291,7 @@ stability_class = st.sidebar.selectbox(
 )
 stab_code = stability_class.split(":")[0].replace("Class ", "").strip()
 back_hours = st.sidebar.slider("คาบเวลาการเคลื่อนที่ของมวลอากาศ (ชั่วโมง):", 1, 24, 12)
-satellite_days = st.sidebar.slider("ช่วงเวลาย้อนหลังข้อมูลดาวเทียม NASA (วัน):", 1, 10, 7)
+satellite_days = st.sidebar.slider("ช่วงเวลาย้อนหลังข้อมูลดาวเทียม NASA (วัน):", 1, 10, 5)
 use_dem_blocking = st.sidebar.checkbox("คำนวณการขวางกั้นทางภูมิประเทศ (DEM Blocking)", value=True)
 
 st.sidebar.markdown("---")
@@ -260,8 +317,8 @@ def fetch_open_meteo_data(lat, lon):
         aq_url = f"https://air-quality-api.open-meteo.com/v1/air-quality?latitude={lat}&longitude={lon}&current=pm2_5"
         wx_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=wind_speed_10m,wind_direction_10m"
         
-        aq_resp = requests.get(aq_url, timeout=8).json()
-        wx_resp = requests.get(wx_url, timeout=8).json()
+        aq_resp = requests.get(aq_url, timeout=5).json()
+        wx_resp = requests.get(wx_url, timeout=5).json()
         
         pm25 = aq_resp.get("current", {}).get("pm2_5")
         wind_speed = wx_resp.get("current", {}).get("wind_speed_10m")
@@ -280,7 +337,7 @@ def fetch_open_meteo_data(lat, lon):
 
 def fetch_influx_data(url, token, org, bucket):
     try:
-        client = InfluxDBClient(url=url, token=token, org=org)
+        client = InfluxDBClient(url=url, token=token, org=org, timeout=5000)
         query_api = client.query_api()
         query = f'''
         from(bucket: "{bucket}")
@@ -319,7 +376,7 @@ if st.sidebar.button("บันทึกชุดข้อมูลปัจจ�
         write_api = client.write_api(write_options=SYNCHRONOUS)
         point = (
             Point("ground_station")
-            .tag("station_id", f"ST-{target_lat:.2f}-{target_lon:.2f}")
+            .tag("station_id", f"ST-{target_lat:.4f}-{target_lon:.4f}")
             .field("pm25", float(ground["pm25"]))
             .field("wind_speed", float(ground["wind_speed"]))
             .field("wind_dir", float(ground["wind_dir"]))
@@ -327,54 +384,60 @@ if st.sidebar.button("บันทึกชุดข้อมูลปัจจ�
         )
         write_api.write(bucket=influx_bucket, org=influx_org, record=point)
         client.close()
-        st.sidebar.success("บันทึกข้อมูลลงฐานข้อมูลเรียบร้อยแล้ว")
+        st.sidebar.success("บันทึกข้อมูลและพิกัดลงฐานข้อมูลเรียบร้อยแล้ว")
     except Exception as e:
         st.sidebar.error(f"ข้อผิดพลาดในการบันทึกข้อมูล: {e}")
 
+# --- ดึงข้อมูลจุดความร้อนครอบคลุมทั้งประเทศไทย (Bounding Box ประเทศไทย: Lon 97.3-105.7, Lat 5.6-20.5) ---
 @st.cache_data(ttl=900)
-def fetch_hotspots(lat, lon, api_key, force_mock, days_back):
+def fetch_thailand_hotspots(lat, lon, api_key, force_mock, days_back):
     if api_key and not force_mock:
         try:
-            # ขยายขอบเขต ±2.5 องศา (ครอบคลุมภาคเหนือตอนบนและพื้นที่ใกล้เคียง)
-            area = f"{lon-2.5},{lat-2.5},{lon+2.5},{lat+2.5}"
-            url = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{api_key}/VIIRS_SNPP_NRT/{area}/{days_back}"
-            resp = requests.get(url, timeout=15)
+            # พิกัดกรอบสี่เหลี่ยมครอบคลุมทั้งประเทศไทย
+            thailand_bbox = "97.3,5.6,105.7,20.5"
+            url = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{api_key}/VIIRS_SNPP_NRT/{thailand_bbox}/{days_back}"
+            resp = requests.get(url, timeout=10)
             if resp.status_code == 200 and "latitude" in resp.text:
                 df = pd.read_csv(io.StringIO(resp.text))
                 if "confidence" in df.columns:
                     df = df[df["confidence"].isin(["n", "h", "nominal", "high"])]
                 if not df.empty:
                     df["acq_datetime"] = df["acq_date"].astype(str) + " " + df["acq_time"].astype(str).str.zfill(4) + " UTC"
-                    return df[["latitude", "longitude", "frp", "acq_datetime"]], f"ดาวเทียม NASA FIRMS VIIRS 375m (ข้อมูลจริงย้อนหลัง {days_back} วัน)"
+                    return df[["latitude", "longitude", "frp", "acq_datetime"]], f"ดาวเทียม NASA FIRMS VIIRS 375m (ครอบคลุมทั้งประเทศไทย ย้อนหลัง {days_back} วัน)"
                 else:
-                    return pd.DataFrame(columns=["latitude", "longitude", "frp", "acq_datetime"]), f"ดาวเทียม NASA FIRMS VIIRS (ไม่พบจุดความร้อนจริงในรอบ {days_back} วัน)"
+                    return pd.DataFrame(columns=["latitude", "longitude", "frp", "acq_datetime"]), f"ดาวเทียม NASA FIRMS VIIRS (ไม่พบจุดความร้อนในประเทศไทยรอบ {days_back} วัน)"
         except Exception:
             pass
-    np.random.seed(int(abs(lat * 100)))
-    lats = lat + np.random.uniform(-0.32, 0.32, 15)
-    lons = lon + np.random.uniform(-0.32, 0.32, 15)
-    frp = np.random.uniform(10.0, 65.0, 15)
-    dt_str = [datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")] * 15
-    return pd.DataFrame({"latitude": lats, "longitude": lons, "frp": frp, "acq_datetime": dt_str}), "ชุดข้อมูลจำลองมาตรฐาน (Synthetic Benchmark)"
+    np.random.seed(42)
+    lats = np.random.uniform(7.0, 20.0, 30)
+    lons = np.random.uniform(98.0, 105.0, 30)
+    frp = np.random.uniform(10.0, 65.0, 30)
+    dt_str = [datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")] * 30
+    return pd.DataFrame({"latitude": lats, "longitude": lons, "frp": frp, "acq_datetime": dt_str}), "ชุดข้อมูลจำลองระดับประเทศ (Synthetic Benchmark)"
 
 @st.cache_data(ttl=3600)
-def check_terrain_blocking(lat1, lon1, lat2, lon2, plume_height_m):
+def batch_check_terrain(target_lat, target_lon, candidate_coords):
+    if not candidate_coords:
+        return {}
     try:
-        pts = []
-        for f in [0.0, 0.25, 0.5, 0.75, 1.0]:
-            pts.append({"latitude": lat1 + f*(lat2 - lat1), "longitude": lon1 + f*(lon2 - lon1)})
-        resp = requests.post("https://api.open-elevation.com/api/v1/lookup", json={"locations": pts}, timeout=5)
+        pts = [{"latitude": target_lat, "longitude": target_lon}]
+        for idx, lat2, lon2 in candidate_coords:
+            pts.append({"latitude": (target_lat + lat2) / 2.0, "longitude": (target_lon + lon2) / 2.0})
+            pts.append({"latitude": lat2, "longitude": lon2})
+        
+        resp = requests.post("https://api.open-elevation.com/api/v1/lookup", json={"locations": pts}, timeout=4)
         if resp.status_code == 200:
             elevs = [r["elevation"] for r in resp.json()["results"]]
             receptor_elev = elevs[0]
-            source_elev = elevs[-1]
-            max_barrier = max(elevs[1:-1])
-            plume_asl = source_elev + plume_height_m
-            is_blocked = max_barrier > (plume_asl + 150)
-            return is_blocked, round(max_barrier - receptor_elev, 0)
+            res_map = {}
+            for i, (idx, _, _) in enumerate(candidate_coords):
+                mid_elev = elevs[1 + i*2]
+                src_elev = elevs[2 + i*2]
+                res_map[idx] = (receptor_elev, mid_elev, src_elev)
+            return res_map
     except Exception:
         pass
-    return False, 0
+    return {}
 
 def gaussian_plume_physics(dist_km, crosswind_km, frp_mw, wind_speed_kmh, stab):
     if dist_km <= 0.1:
@@ -407,9 +470,9 @@ def gaussian_plume_physics(dist_km, crosswind_km, frp_mw, wind_speed_kmh, stab):
     
     return round(float(conc_ug_m3), 2), round(float(H), 1)
 
-hotspots_df, hs_source = fetch_hotspots(target_lat, target_lon, nasa_key, use_mock_hs, satellite_days)
+hotspots_df, hs_source = fetch_thailand_hotspots(target_lat, target_lon, nasa_key, use_mock_hs, satellite_days)
 
-st.markdown(f"**ข้อมูลเมตาของการประมวลผล (Metadata):** พื้นที่ศึกษา: *{st.session_state.place_name}* (`{target_lat:.4f}°N, {target_lon:.4f}°E`) | แหล่งข้อมูลจุดความร้อน: *{hs_source}* (ตรวจพบทั้งหมด {len(hotspots_df)} จุดในภูมิภาค) | แหล่งข้อมูลอุตุนิยมวิทยา: *{ground['source']}*")
+st.markdown(f"**ข้อมูลเมตาของการประมวลผล (Metadata):** จุดรับผลกระทบอ้างอิง: *{st.session_state.place_name}* (`{target_lat:.4f}°N, {target_lon:.4f}°E`) | แหล่งข้อมูลจุดความร้อน: *{hs_source}* (ตรวจพบทั้งหมด {len(hotspots_df)} จุดทั่วประเทศ) | แหล่งข้อมูลอุตุนิยมวิทยา: *{ground['source']}*")
 
 upwind_bearing = ground["wind_dir"] % 360
 max_radius_km = round(ground["wind_speed"] * back_hours, 2)
@@ -426,29 +489,45 @@ def calc_dist_bearing(lat1, lon1, lat2, lon2):
     bearing = (np.degrees(np.arctan2(y, x)) + 360) % 360
     return dist, bearing
 
-results = []
+pre_calc = []
+candidates_for_dem = []
 for idx, row in hotspots_df.iterrows():
     dist, bearing = calc_dist_bearing(target_lat, target_lon, row["latitude"], row["longitude"])
     angle_diff_rad = np.radians((bearing - upwind_bearing + 180) % 360 - 180)
-    
     downwind_x = dist * np.cos(angle_diff_rad)
     crosswind_y = abs(dist * np.sin(angle_diff_rad))
     
-    if downwind_x > 0 and dist <= max_radius_km:
+    in_range = (downwind_x > 0) and (dist <= max_radius_km)
+    if in_range:
         pred_pm25, plume_h = gaussian_plume_physics(downwind_x, crosswind_y, row["frp"], ground["wind_speed"], stab_code)
-        blocked, barrier_h = check_terrain_blocking(target_lat, target_lon, row["latitude"], row["longitude"], plume_h) if use_dem_blocking else (False, 0)
-        effective_pm25 = 0.0 if blocked else pred_pm25
+        if pred_pm25 > 0.05 and use_dem_blocking and len(candidates_for_dem) < 40:
+            candidates_for_dem.append((idx, row["latitude"], row["longitude"]))
     else:
-        pred_pm25, plume_h, blocked, barrier_h, effective_pm25 = 0.0, 0.0, False, 0, 0.0
+        pred_pm25, plume_h = 0.0, 0.0
+    pre_calc.append((idx, row, dist, downwind_x, crosswind_y, pred_pm25, plume_h))
+
+terrain_map = batch_check_terrain(target_lat, target_lon, candidates_for_dem) if use_dem_blocking else {}
+
+results = []
+for idx, row, dist, downwind_x, crosswind_y, pred_pm25, plume_h in pre_calc:
+    blocked = False
+    barrier_h = 0
+    if idx in terrain_map:
+        rec_elev, mid_elev, src_elev = terrain_map[idx]
+        if mid_elev > (src_elev + plume_h + 150):
+            blocked = True
+            barrier_h = round(mid_elev - rec_elev, 0)
+            
+    effective_pm25 = 0.0 if blocked else pred_pm25
 
     results.append({
-        "รหัสจุดความร้อน": f"HS-{idx+1:03d}",
+        "รหัสจุดความร้อน": f"TH-{idx+1:04d}",
         "เวลาตรวจพบดาวเทียม": row.get("acq_datetime", "-"),
         "ละติจูด (°N)": round(row["latitude"], 4),
         "ลองจิจูด (°E)": round(row["longitude"], 4),
+        "ลิงก์ Google Maps": f"https://www.google.com/maps?q={row['latitude']:.4f},{row['longitude']:.4f}",
         "ระยะห่างรวม (km)": round(dist, 2),
         "ระยะตามแนวลม x (km)": round(max(downwind_x, 0), 2),
-        "ระยะเบี่ยงแนวลม y (km)": round(crosswind_y, 2),
         "FRP (MW)": round(row["frp"], 1),
         "ความสูงกลุ่มควัน H (m)": plume_h,
         "สภาพภูมิประเทศ": f"แนวเขาสูง +{int(barrier_h)} m (ขวางกั้น)" if blocked else "เปิดโล่ง (ไม่มีสิ่งกีดขวาง)",
@@ -460,6 +539,14 @@ if not res_df.empty:
     suspect_df = res_df[res_df["ความเข้มข้นทำนาย (µg/m³)"] > 0.05].sort_values(by="ความเข้มข้นทำนาย (µg/m³)", ascending=False).reset_index(drop=True)
     suspect_df.index += 1
     suspect_df.index.name = "ลำดับที่"
+    if not suspect_df.empty:
+        top_places = []
+        for i, r in suspect_df.iterrows():
+            if i <= 10:
+                top_places.append(reverse_geocode_landmark(r["ละติจูด (°N)"], r["ลองจิจูด (°E)"]))
+            else:
+                top_places.append(f"พิกัด ({r['ละติจูด (°N)']}, {r['ลองจิจูด (°E)']})")
+        suspect_df["สถานที่ใกล้เคียงอ้างอิง"] = top_places
 else:
     suspect_df = pd.DataFrame()
 
@@ -472,13 +559,13 @@ c1, c2, c3, c4 = st.columns(4)
 c1.metric("ความเข้มข้นตรวจวัดจริง (C_obs)", f"{ground['pm25']} µg/m³", classify_pm25_thai(ground['pm25']))
 c2.metric("ความเข้มข้นเชิงทำนายรวม (C_pred)", f"{total_predicted_pm25} µg/m³", f"ความคลาดเคลื่อนสัมพัทธ์ {rel_error}%")
 c3.metric("เวกเตอร์ลมต้นทาง (Wind Vector)", f"{ground['wind_speed']} km/h", degree_to_thai_dir(upwind_bearing))
-c4.metric("จุดความร้อนในแนวลม / ทั้งหมด", f"{len(suspect_df)} / {len(res_df)} จุด", f"รัศมีทำการลม {max_radius_km} km")
+c4.metric("จุดความร้อนในแนวลม / ทั้งประเทศ", f"{len(suspect_df)} / {len(res_df)} จุด", f"รัศมีทำการลม {max_radius_km} km")
 
 col_map, col_tbl = st.columns([1.15, 1.15])
 
 with col_map:
-    st.subheader("2. แบบจำลองเชิงพื้นที่และการแพร่กระจายของกลุ่มควัน")
-    m = folium.Map(location=[target_lat, target_lon], zoom_start=8, max_zoom=20, tiles=None)
+    st.subheader("2. แบบจำลองเชิงพื้นที่ระดับประเทศและการแพร่กระจายของกลุ่มควัน")
+    m = folium.Map(location=[target_lat, target_lon], zoom_start=st.session_state.zoom_level, max_zoom=20, tiles=None)
     
     folium.TileLayer(
         tiles="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}&hl=th",
@@ -509,7 +596,7 @@ with col_map:
 
     folium.Marker(
         [target_lat, target_lon],
-        popup="จุดรับผลกระทบ / สถานีตรวจวัด (Receptor)",
+        popup="จุดรับผลกระทบอ้างอิง (Receptor)",
         icon=folium.Icon(color="darkblue", icon="info-sign")
     ).add_to(m)
     
@@ -523,7 +610,9 @@ with col_map:
     folium.Polygon(locations=cone_pts, color="#D97706", weight=1.5, fill=True, fill_opacity=0.22).add_to(m)
     
     if not res_df.empty:
-        for _, r in res_df.iterrows():
+        # แสดงผลสูงสุด 250 จุดทั่วประเทศเพื่อให้เห็นการกระจายตัวทุกภูมิภาคอย่างลื่นไหล
+        plot_df = res_df.sort_values(by=["ความเข้มข้นทำนาย (µg/m³)", "FRP (MW)"], ascending=[False, False]).head(250)
+        for _, r in plot_df.iterrows():
             is_active = r["ความเข้มข้นทำนาย (µg/m³)"] > 0.05
             is_blocked = "ขวางกั้น" in r["สภาพภูมิประเทศ"]
             color = "#DC2626" if is_active else ("#7C3AED" if is_blocked else "#F59E0B")
@@ -532,30 +621,34 @@ with col_map:
                 radius=7 if is_active else 4,
                 color=color,
                 fill=True, fill_opacity=0.85,
-                popup=f"{r['รหัสจุดความร้อน']} ({r['เวลาตรวจพบดาวเทียม']}) | FRP: {r['FRP (MW)']} MW | C_pred: {r['ความเข้มข้นทำนาย (µg/m³)']} µg/m³"
+                popup=f"{r['รหัสจุดความร้อน']} | FRP: {r['FRP (MW)']} MW | C_pred: {r['ความเข้มข้นทำนาย (µg/m³)']} µg/m³"
             ).add_to(m)
 
     folium.LayerControl(position="topright").add_to(m)
             
-    map_data = st_folium(m, width=620, height=440)
-    st.caption("ภาพที่ 1: ตำแหน่งจุดความร้อนจริงจากดาวเทียม NASA FIRMS VIIRS (สีแดง: อยู่ในแนวกระแสลมส่งผลกระทบ, สีม่วง: ถูกแนวเขาขวางกั้น, สีเหลืองส้ม: จุดความร้อนจริงในภูมิภาคที่อยู่นอกแนวลม)")
+    map_data = st_folium(m, width=620, height=440, returned_objects=["last_clicked"])
+    st.caption("ภาพที่ 1: การกระจายตัวของจุดความร้อนจริงจากดาวเทียม NASA FIRMS VIIRS ทั่วประเทศไทย (สีแดง: อยู่ในแนวกระแสลมส่งผลกระทบ, สีม่วง: ถูกแนวเขาขวางกั้น, สีเหลืองส้ม: จุดความร้อนในภูมิภาคอื่นของประเทศ) คลิกบนแผนที่เพื่อย้ายจุดรับผลกระทบไปจังหวัดใดก็ได้")
     if map_data and map_data.get("last_clicked"):
         clicked_lat = round(map_data["last_clicked"]["lat"], 4)
         clicked_lon = round(map_data["last_clicked"]["lng"], 4)
         if clicked_lat != st.session_state.lat or clicked_lon != st.session_state.lon:
             st.session_state.lat = clicked_lat
             st.session_state.lon = clicked_lon
-            st.session_state.place_name = "พิกัดกำหนดเองจากแผนที่เชิงพื้นที่"
+            st.session_state.place_name = reverse_geocode_landmark(clicked_lat, clicked_lon)
+            st.session_state.zoom_level = 9
             st.rerun()
 
 with col_tbl:
     st.subheader("3. ตารางผลการวิเคราะห์เชิงปริมาณและการจัดลำดับ")
     if not suspect_df.empty:
         st.dataframe(
-            suspect_df[["รหัสจุดความร้อน", "เวลาตรวจพบดาวเทียม", "ระยะตามแนวลม x (km)", "FRP (MW)", "สภาพภูมิประเทศ", "ความเข้มข้นทำนาย (µg/m³)"]],
+            suspect_df[["รหัสจุดความร้อน", "สถานที่ใกล้เคียงอ้างอิง", "ระยะตามแนวลม x (km)", "FRP (MW)", "ความเข้มข้นทำนาย (µg/m³)", "ลิงก์ Google Maps"]],
+            column_config={
+                "ลิงก์ Google Maps": st.column_config.LinkColumn("เปิดแผนที่", display_text="ดูบน Google Maps")
+            },
             use_container_width=True
         )
-        st.caption("ตารางที่ 1: ผลการคำนวณค่าความเข้มข้นฝุ่นละอองขนาดเล็ก ณ จุดรับผลกระทบ จำแนกตามแหล่งกำเนิดความร้อน")
+        st.caption("ตารางที่ 1: ผลการคำนวณค่าความเข้มข้นฝุ่นละอองขนาดเล็ก ณ จุดรับผลกระทบ พร้อมระบุชื่อสถานที่ใกล้เคียงและลิงก์พิกัดอ้างอิง")
         
         raw_str = suspect_df.to_csv() + datetime.now().strftime("%Y-%m-%d %H:%M")
         hash_val = hashlib.sha256(raw_str.encode()).hexdigest()
@@ -565,14 +658,21 @@ with col_tbl:
         st.download_button(
             label="ส่งออกตารางผลการวิเคราะห์ (Excel CSV)",
             data=csv_suspect.encode("utf-8-sig"),
-            file_name=f"aerolex_quantitative_report_{datetime.now().strftime('%Y%m%d')}.csv",
+            file_name=f"aerolex_thailand_report_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv"
         )
     else:
-        st.markdown(f"<div style='background:#FFFBEB; border:1px solid #FDE68A; color:#92400E; padding:0.85rem; font-size:1.2rem;'>ตรวจพบจุดความร้อนจริงในภูมิภาคทั้งหมด {len(res_df)} จุด แต่ไม่มีจุดใดตกอยู่ในแนวกรวยลมของสถานีตรวจวัดในช่วงเวลาที่กำหนด (สามารถทดลองปรับเพิ่มคาบเวลาการเคลื่อนที่ของมวลอากาศที่แถบด้านซ้ายเพื่อขยายรัศมีกรวยลม)</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='background:#FFFBEB; border:1px solid #FDE68A; color:#92400E; padding:0.85rem; font-size:1.2rem;'>ตรวจพบจุดความร้อนจริงทั่วประเทศไทยทั้งหมด {len(res_df)} จุด (แสดงเป็นจุดสีเหลืองส้มบนแผนที่) แต่ไม่มีจุดใดตกอยู่ในแนวกรวยลมของจุดรับผลกระทบปัจจุบัน สามารถคลิกเลือกจุดใกล้กลุ่มจุดความร้อนบนแผนที่เพื่อวิเคราะห์รายพื้นที่ได้ทันที</div>", unsafe_allow_html=True)
         if not res_df.empty:
-            with st.expander(f"ดูรายการจุดความร้อนจริงทั้งหมดที่ดาวเทียมตรวจพบในภูมิภาค ({len(res_df)} จุด)"):
-                st.dataframe(res_df[["รหัสจุดความร้อน", "เวลาตรวจพบดาวเทียม", "ละติจูด (°N)", "ลองจิจูด (°E)", "ระยะห่างรวม (km)", "FRP (MW)"]].head(50), use_container_width=True)
+            with st.expander(f"ดูรายการจุดความร้อนจริงที่ตรวจพบทั่วประเทศไทย (เรียงตามความรุนแรง FRP สูงสุด 50 อันดับ)"):
+                top_th = res_df.sort_values(by="FRP (MW)", ascending=False).head(50)
+                st.dataframe(
+                    top_th[["รหัสจุดความร้อน", "เวลาตรวจพบดาวเทียม", "ละติจูด (°N)", "ลองจิจูด (°E)", "FRP (MW)", "ลิงก์ Google Maps"]],
+                    column_config={
+                        "ลิงก์ Google Maps": st.column_config.LinkColumn("เปิดแผนที่", display_text="ดูบน Google Maps")
+                    },
+                    use_container_width=True
+                )
 
 st.subheader("4. ระเบียบวิธีวิจัยและสมการทางคณิตศาสตร์ที่ใช้อ้างอิง")
 st.markdown(r"""
@@ -601,7 +701,11 @@ if st.button("ประมวลผลและแปลความหมาย
         client.close()
         if not df_hist.empty:
             df_hist["วัน-เวลา (เวลาประเทศไทย)"] = pd.to_datetime(df_hist["_time"]).dt.tz_convert("Asia/Bangkok").dt.strftime("%Y-%m-%d %H:%M:%S")
-            df_hist["รหัสสถานีตรวจวัด"] = df_hist.get("station_id", "N/A")
+            
+            loc_info = df_hist["station_id"].apply(parse_station_to_location)
+            df_hist["สถานที่ตรวจวัดอ้างอิง"] = [x[0] for x in loc_info]
+            df_hist["ลิงก์ Google Maps"] = [x[1] for x in loc_info]
+            
             df_hist["ความเข้มข้น PM2.5 (µg/m³)"] = df_hist["pm25"].round(1)
             df_hist["เกณฑ์คุณภาพอากาศ (กรมควบคุมมลพิษ)"] = df_hist["pm25"].apply(classify_pm25_thai)
             df_hist["ความเร็วลม (km/h)"] = df_hist["wind_speed"].round(1)
@@ -609,15 +713,22 @@ if st.button("ประมวลผลและแปลความหมาย
 
             export_cols = [
                 "วัน-เวลา (เวลาประเทศไทย)",
-                "รหัสสถานีตรวจวัด",
+                "สถานที่ตรวจวัดอ้างอิง",
                 "ความเข้มข้น PM2.5 (µg/m³)",
                 "เกณฑ์คุณภาพอากาศ (กรมควบคุมมลพิษ)",
                 "ความเร็วลม (km/h)",
-                "ทิศทางลมต้นทาง"
+                "ทิศทางลมต้นทาง",
+                "ลิงก์ Google Maps"
             ]
             df_clean = df_hist[export_cols].sort_values(by="วัน-เวลา (เวลาประเทศไทย)", ascending=False)
             
-            st.dataframe(df_clean, use_container_width=True)
+            st.dataframe(
+                df_clean,
+                column_config={
+                    "ลิงก์ Google Maps": st.column_config.LinkColumn("แผนที่", display_text="ดูบน Google Maps")
+                },
+                use_container_width=True
+            )
             
             csv_output = "sep=,\n" + df_clean.to_csv(index=False)
             st.download_button(
