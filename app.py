@@ -22,7 +22,7 @@ st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Sarabun:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap');
 
-    html, body, [class*="css"], .stApp, p, h1, h2, h3, h4, h5, h6, span, div, label, input, select, textarea, button {
+    html, body, .stApp, p, h1, h2, h3, h4, h5, h6, label, input, select, textarea, button, .stMarkdown, .stDataFrame {
         font-family: 'Sarabun', sans-serif !important;
     }
 
@@ -101,7 +101,7 @@ search_query = st.sidebar.text_input("สืบค้นพิกัดภูม
 if st.sidebar.button("สืบค้นพิกัดภูมิศาสตร์"):
     if search_query:
         try:
-            geolocator = Nominatim(user_agent="aero_lex_academic_v2")
+            geolocator = Nominatim(user_agent="aero_lex_academic_v3")
             location = geolocator.geocode(search_query + " Thailand")
             if location:
                 st.session_state.lat = round(location.latitude, 4)
@@ -330,7 +330,12 @@ col_map, col_tbl = st.columns([1.15, 1.15])
 
 with col_map:
     st.subheader("2. แบบจำลองเชิงพื้นที่และการแพร่กระจายของกลุ่มควัน")
-    m = folium.Map(location=[target_lat, target_lon], zoom_start=10, tiles="CartoDB positron")
+    m = folium.Map(
+        location=[target_lat, target_lon],
+        zoom_start=10,
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri WorldTopoMap"
+    )
     folium.Marker(
         [target_lat, target_lon],
         popup="สถานีตรวจวัดภาคพื้นดิน (Receptor)",
