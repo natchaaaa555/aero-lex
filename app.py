@@ -10,7 +10,6 @@ from influxdb_client.client.write_api import SYNCHRONOUS
 from geopy.geocoders import Nominatim
 from datetime import datetime, timezone
 import hashlib
-import random
 
 st.set_page_config(
     page_title="Aero-Lex | แบบจำลองฟิสิกส์บรรยากาศเพื่อระบุแหล่งกำเนิดฝุ่นละอองขนาดเล็ก",
@@ -64,7 +63,7 @@ st.markdown("""
 st.title("ระบบแบบจำลองฟิสิกส์บรรยากาศเพื่อคัดกรองและระบุแหล่งกำเนิดฝุ่นละอองขนาดเล็ก (PM2.5)")
 st.markdown("""
 <div class="academic-abstract">
-    <strong>บทคัดย่อเชิงระบบ (System Overview):</strong> แพลตฟอร์มการวิเคราะห์เชิงปริมาณที่บูรณาการข้อมูลตรวจวัดภาคพื้นดินแบบเวลาจริง (InfluxDB Time-Series Database) ร่วมกับข้อมูลการแผ่รังสีความร้อนจากดาวเทียม (NASA FIRMS VIIRS) ภายใต้กรอบทฤษฎีการแพร่กระจายของมลพิษแบบเกาส์เซียน (Gaussian Plume Dispersion Model) สมการแรงลอยตัวทางความร้อนของบริกส์ (Briggs' Plume Rise) และการวิเคราะห์สิ่งกีดขวางทางภูมิประเทศจากแบบจำลองระดับความสูงเชิงเลข (DEM Orographic Blocking)
+    <strong>บทคัดย่อเชิงระบบ (System Overview):</strong> แพลตฟอร์มการวิเคราะห์เชิงปริมาณที่บูรณาการข้อมูลคุณภาพอากาศและอุตุนิยมวิทยาแบบเวลาจริง (Open-Meteo Atmospheric API & InfluxDB Time-Series Database) ร่วมกับข้อมูลการแผ่รังสีความร้อนจากดาวเทียม (NASA FIRMS VIIRS) ภายใต้กรอบทฤษฎีการแพร่กระจายของมลพิษแบบเกาส์เซียน (Gaussian Plume Dispersion Model) สมการแรงลอยตัวทางความร้อนของบริกส์ (Briggs' Plume Rise) และการวิเคราะห์สิ่งกีดขวางทางภูมิประเทศจากแบบจำลองระดับความสูงเชิงเลข (DEM Orographic Blocking)
 </div>
 """, unsafe_allow_html=True)
 
@@ -101,7 +100,7 @@ search_query = st.sidebar.text_input("สืบค้นพิกัดภูม
 if st.sidebar.button("สืบค้นพิกัดภูมิศาสตร์"):
     if search_query:
         try:
-            geolocator = Nominatim(user_agent="aero_lex_academic_v5")
+            geolocator = Nominatim(user_agent="aero_lex_academic_v6")
             location = geolocator.geocode(search_query + " Thailand")
             if location:
                 st.session_state.lat = round(location.latitude, 4)
@@ -133,34 +132,42 @@ back_hours = st.sidebar.slider("คาบเวลาย้อนรอยมว
 use_dem_blocking = st.sidebar.checkbox("เปิดใช้การคัดกรองสิ่งกีดขวางภูมิประเทศ (DEM Blocking)", value=True)
 
 st.sidebar.header("ส่วนที่ 3: การเชื่อมต่อฐานข้อมูลและดาวเทียม")
+data_mode = st.sidebar.radio(
+    "แหล่งข้อมูลอุตุนิยมวิทยาและฝุ่น:",
+    ["ดึงอัตโนมัติตามพิกัด (Open-Meteo API)", "ดึงข้อมูลล่าสุดจากฐานข้อมูล InfluxDB"]
+)
+
 influx_url = st.sidebar.text_input("InfluxDB Endpoint URL", value=DEFAULT_URL)
 influx_token = st.sidebar.text_input("InfluxDB Access Token", value=DEFAULT_TOKEN, type="password")
 influx_org = st.sidebar.text_input("Organization ID", value=DEFAULT_ORG)
 influx_bucket = st.sidebar.text_input("Data Bucket", value=DEFAULT_BUCKET)
 
-if st.sidebar.button("บันทึกข้อมูลจำลองจากสถานีตรวจวัดเข้าฐานข้อมูล"):
+# --- ฟังก์ชันดึงข้อมูลจาก Open-Meteo API (ไม่ต้องใช้ไมโครคอนโทรลเลอร์) ---
+@st.cache_data(ttl=600)
+def fetch_open_meteo_data(lat, lon):
     try:
-        client = InfluxDBClient(url=influx_url, token=influx_token, org=influx_org)
-        write_api = client.write_api(write_options=SYNCHRONOUS)
-        point = (
-            Point("ground_station")
-            .tag("station_id", "ACAD-ST01")
-            .field("pm25", round(random.uniform(75.0, 130.0), 1))
-            .field("wind_speed", round(random.uniform(8.0, 20.0), 1))
-            .field("wind_dir", round(random.uniform(190.0, 260.0), 1))
-            .time(datetime.now(timezone.utc))
-        )
-        write_api.write(bucket=influx_bucket, org=influx_org, record=point)
-        client.close()
-        st.sidebar.success("บันทึกชุดข้อมูลอนุกรมเวลาลง InfluxDB สำเร็จ")
-    except Exception as e:
-        st.sidebar.error(f"การบันทึกข้อมูลล้มเหลว: {e}")
+        aq_url = f"https://air-quality-api.open-meteo.com/v1/air-quality?latitude={lat}&longitude={lon}&current=pm2_5"
+        wx_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=wind_speed_10m,wind_direction_10m"
+        
+        aq_resp = requests.get(aq_url, timeout=8).json()
+        wx_resp = requests.get(wx_url, timeout=8).json()
+        
+        pm25 = aq_resp.get("current", {}).get("pm2_5")
+        wind_speed = wx_resp.get("current", {}).get("wind_speed_10m")
+        wind_dir = wx_resp.get("current", {}).get("wind_direction_10m")
+        
+        if pm25 is not None and wind_speed is not None and wind_dir is not None:
+            return {
+                "source": "Open-Meteo Real-Time Atmospheric API (ข้อมูลจริงตามพิกัด)",
+                "pm25": round(float(pm25), 1),
+                "wind_speed": max(round(float(wind_speed), 1), 1.0),
+                "wind_dir": round(float(wind_dir), 1)
+            }
+    except Exception:
+        pass
+    return None
 
-nasa_key = st.sidebar.text_input("NASA FIRMS API Key", value=DEFAULT_NASA_KEY, type="password")
-use_mock_hs = st.sidebar.checkbox("ใช้ชุดข้อมูลจุดความร้อนจำลอง (Simulation Dataset)", value=True)
-
-# --- ฟังก์ชันดึงข้อมูล ---
-def fetch_ground_data(url, token, org, bucket):
+def fetch_influx_data(url, token, org, bucket):
     try:
         client = InfluxDBClient(url=url, token=token, org=org)
         query_api = client.query_api()
@@ -185,7 +192,38 @@ def fetch_ground_data(url, token, org, bucket):
             }
     except Exception:
         pass
-    return {"source": "ค่าพารามิเตอร์มาตรฐานเริ่มต้น", "pm25": 92.4, "wind_speed": 12.0, "wind_dir": 225.0}
+    return None
+
+# เลือกแหล่งข้อมูลตามโหมดที่ผู้ใช้ตั้งไว้
+ground = None
+if data_mode == "ดึงอัตโนมัติตามพิกัด (Open-Meteo API)":
+    ground = fetch_open_meteo_data(target_lat, target_lon)
+if ground is None:
+    ground = fetch_influx_data(influx_url, influx_token, influx_org, influx_bucket)
+if ground is None:
+    ground = {"source": "ค่าพารามิเตอร์มาตรฐานสำรอง", "pm25": 45.0, "wind_speed": 10.0, "wind_dir": 225.0}
+
+# ปุ่มบันทึกค่าจริงที่ดึงได้จาก Open-Meteo ลงในฐานข้อมูล InfluxDB Cloud
+if st.sidebar.button("บันทึกข้อมูลตรวจวัดปัจจุบันลงฐานข้อมูล InfluxDB"):
+    try:
+        client = InfluxDBClient(url=influx_url, token=influx_token, org=influx_org)
+        write_api = client.write_api(write_options=SYNCHRONOUS)
+        point = (
+            Point("ground_station")
+            .tag("station_id", f"API-{target_lat:.2f}-{target_lon:.2f}")
+            .field("pm25", float(ground["pm25"]))
+            .field("wind_speed", float(ground["wind_speed"]))
+            .field("wind_dir", float(ground["wind_dir"]))
+            .time(datetime.now(timezone.utc))
+        )
+        write_api.write(bucket=influx_bucket, org=influx_org, record=point)
+        client.close()
+        st.sidebar.success(f"บันทึกข้อมูลจริง (PM2.5: {ground['pm25']} µg/m³) ลง InfluxDB สำเร็จ")
+    except Exception as e:
+        st.sidebar.error(f"การบันทึกข้อมูลล้มเหลว: {e}")
+
+nasa_key = st.sidebar.text_input("NASA FIRMS API Key", value=DEFAULT_NASA_KEY, type="password")
+use_mock_hs = st.sidebar.checkbox("ใช้ชุดข้อมูลจุดความร้อนจำลอง (Simulation Dataset)", value=True)
 
 def fetch_hotspots(lat, lon, api_key, force_mock):
     if api_key and not force_mock:
@@ -259,10 +297,9 @@ def gaussian_plume_physics(dist_km, crosswind_km, frp_mw, wind_speed_kmh, stab):
     
     return round(float(conc_ug_m3), 2), round(float(H), 1)
 
-ground = fetch_ground_data(influx_url, influx_token, influx_org, influx_bucket)
 hotspots_df, hs_source = fetch_hotspots(target_lat, target_lon, nasa_key, use_mock_hs)
 
-st.markdown(f"**พื้นที่ศึกษาปัจจุบัน:** {st.session_state.place_name} (พิกัด `{target_lat:.4f}°N, {target_lon:.4f}°E`) | **แหล่งข้อมูลจุดความร้อน:** {hs_source} | **แหล่งข้อมูลภาคพื้นดิน:** {ground['source']}")
+st.markdown(f"**พื้นที่ศึกษาปัจจุบัน:** {st.session_state.place_name} (พิกัด `{target_lat:.4f}°N, {target_lon:.4f}°E`) | **แหล่งข้อมูลจุดความร้อน:** {hs_source} | **แหล่งข้อมูลอุตุนิยมวิทยาและฝุ่น:** {ground['source']}")
 
 upwind_bearing = ground["wind_dir"] % 360
 max_radius_km = round(ground["wind_speed"] * back_hours, 2)
@@ -332,7 +369,6 @@ with col_map:
     st.subheader("2. แบบจำลองเชิงพื้นที่และการแพร่กระจายของกลุ่มควัน")
     m = folium.Map(location=[target_lat, target_lon], zoom_start=12, max_zoom=20, tiles=None)
     
-    # ชั้นที่ 1: Google Earth Satellite Hybrid (ภาพถ่ายดาวเทียมคมชัดสูง + ชื่อสถานที่และถนน)
     folium.TileLayer(
         tiles="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}&hl=th",
         attr="Google Satellite Hybrid",
@@ -342,7 +378,6 @@ with col_map:
         control=True
     ).add_to(m)
 
-    # ชั้นที่ 2: Google Terrain (แผนที่ภูมิประเทศแสดงความสูงภูเขาและหุบเขา)
     folium.TileLayer(
         tiles="https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}&hl=th",
         attr="Google Terrain",
@@ -352,7 +387,6 @@ with col_map:
         control=True
     ).add_to(m)
 
-    # ชั้นที่ 3: Google Maps (แผนที่ถนนและสถานที่ละเอียด)
     folium.TileLayer(
         tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&hl=th",
         attr="Google Maps",
@@ -364,7 +398,7 @@ with col_map:
 
     folium.Marker(
         [target_lat, target_lon],
-        popup="สถานีตรวจวัดภาคพื้นดิน (Receptor)",
+        popup="จุดรับผลกระทบ / สถานีตรวจวัด (Receptor)",
         icon=folium.Icon(color="darkblue", icon="info-sign")
     ).add_to(m)
     
@@ -393,7 +427,7 @@ with col_map:
     folium.LayerControl(position="topright").add_to(m)
             
     map_data = st_folium(m, width=620, height=440)
-    st.caption("ภาพที่ 1: ภาพถ่ายดาวเทียมความละเอียดสูง Google Earth แสดงการกระจายตัวของจุดความร้อนและแนวกรวยลม (กดไอคอนมุมขวาบนของแผนที่เพื่อสลับโหมดภูมิประเทศ)")
+    st.caption("ภาพที่ 1: ภาพถ่ายดาวเทียมความละเอียดสูง Google Earth แสดงการกระจายตัวของจุดความร้อนและแนวกรวยลม (คลิกบนแผนที่เพื่อย้ายจุดศึกษาและดึงสภาพอากาศจริงทันที)")
     if map_data and map_data.get("last_clicked"):
         clicked_lat = round(map_data["last_clicked"]["lat"], 4)
         clicked_lon = round(map_data["last_clicked"]["lng"], 4)
