@@ -12,9 +12,61 @@ from datetime import datetime, timezone
 import hashlib
 import random
 
-st.set_page_config(page_title="Aero-Lex Physics | แบบจำลองฟิสิกส์บรรยากาศคัดกรองต้นกำเนิดมลพิษ", layout="wide")
-st.title("Aero-Lex: แบบจำลองฟิสิกส์บรรยากาศเพื่อคัดกรองและระบุแหล่งกำเนิด PM2.5")
-st.caption("บูรณาการ Gaussian Plume Dispersion Model + Briggs' Thermal Buoyancy + DEM Orographic Blocking")
+st.set_page_config(
+    page_title="Aero-Lex | แบบจำลองฟิสิกส์บรรยากาศเพื่อระบุแหล่งกำเนิดฝุ่นละอองขนาดเล็ก",
+    layout="wide"
+)
+
+# --- บังคับใช้ฟอนต์ Sarabun และจัดรูปแบบสไตล์เอกสารวิชาการ ---
+st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Sarabun:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap');
+
+    html, body, [class*="css"], .stApp, p, h1, h2, h3, h4, h5, h6, span, div, label, input, select, textarea, button {
+        font-family: 'Sarabun', sans-serif !important;
+    }
+
+    h1 {
+        font-weight: 700 !important;
+        font-size: 1.85rem !important;
+        letter-spacing: -0.01em;
+        border-bottom: 2px solid #4A5568;
+        padding-bottom: 0.5rem;
+        margin-bottom: 0.75rem !important;
+    }
+
+    h2, h3 {
+        font-weight: 600 !important;
+        font-size: 1.25rem !important;
+        margin-top: 1rem !important;
+    }
+
+    .academic-abstract {
+        background-color: rgba(128, 128, 128, 0.08);
+        border-left: 4px solid #2B6CB0;
+        padding: 1rem 1.25rem;
+        border-radius: 0 4px 4px 0;
+        margin-bottom: 1.25rem;
+        font-size: 0.98rem;
+        line-height: 1.65;
+    }
+
+    .stMetric {
+        background-color: rgba(128, 128, 128, 0.05);
+        border: 1px solid rgba(128, 128, 128, 0.2);
+        padding: 0.75rem 1rem;
+        border-radius: 4px;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- ส่วนหัวเอกสารวิชาการ ---
+st.title("ระบบแบบจำลองฟิสิกส์บรรยากาศเพื่อคัดกรองและระบุแหล่งกำเนิดฝุ่นละอองขนาดเล็ก (PM2.5)")
+st.markdown("""
+<div class="academic-abstract">
+    <strong>บทคัดย่อเชิงระบบ (System Overview):</strong> แพลตฟอร์มการวิเคราะห์เชิงปริมาณที่บูรณาการข้อมูลตรวจวัดภาคพื้นดินแบบเวลาจริง (InfluxDB Time-Series Database) ร่วมกับข้อมูลการแผ่รังสีความร้อนจากดาวเทียม (NASA FIRMS VIIRS) ภายใต้กรอบทฤษฎีการแพร่กระจายของมลพิษแบบเกาส์เซียน (Gaussian Plume Dispersion Model) สมการแรงลอยตัวทางความร้อนของบริกส์ (Briggs' Plume Rise) และการวิเคราะห์สิ่งกีดขวางทางภูมิประเทศจากแบบจำลองระดับความสูงเชิงเลข (DEM Orographic Blocking)
+</div>
+""", unsafe_allow_html=True)
 
 # --- ค่าเชื่อมต่อฐานข้อมูลและ API ---
 DEFAULT_URL = "https://us-east-1-1.aws.cloud2.influxdata.com"
@@ -28,64 +80,71 @@ if "lat" not in st.session_state:
 if "lon" not in st.session_state:
     st.session_state.lon = 99.4908
 if "place_name" not in st.session_state:
-    st.session_state.place_name = "อ.เมือง จ.ลำปาง (แอ่งกระทะลำปาง)"
+    st.session_state.place_name = "อำเภอเมืองลำปาง จังหวัดลำปาง (แอ่งกระทะลำปาง)"
 
-# --- แถบเมนูด้านซ้าย ---
-st.sidebar.header("📍 1. พิกัดสถานีตรวจวัด (Receptor)")
+# --- แถบควบคุมพารามิเตอร์ (Sidebar) ---
+st.sidebar.header("ส่วนที่ 1: พิกัดจุดรับผลกระทบ (Receptor)")
 preset_locations = {
-    "กำหนดเอง / ค้นหาด้านล่าง": None,
-    "อ.เมือง จ.ลำปาง": (18.2888, 99.4908),
-    "อ.แม่เมาะ จ.ลำปาง": (18.2936, 99.6517),
-    "รร.จุฬาภรณราชวิทยาลัย เชียงราย": (19.9575, 99.8825),
-    "อ.แม่สาย จ.เชียงราย": (20.4335, 99.8806),
-    "อ.เมือง จ.เชียงใหม่": (18.7883, 98.9853)
+    "ระบุพิกัดเอง / ค้นหาด้านล่าง": None,
+    "อำเภอเมืองลำปาง จังหวัดลำปาง": (18.2888, 99.4908),
+    "อำเภอแม่เมาะ จังหวัดลำปาง": (18.2936, 99.6517),
+    "โรงเรียนวิทยาศาสตร์จุฬาภรณราชวิทยาลัย เชียงราย": (19.9575, 99.8825),
+    "อำเภอแม่สาย จังหวัดเชียงราย": (20.4335, 99.8806),
+    "อำเภอเมืองเชียงใหม่ จังหวัดเชียงใหม่": (18.7883, 98.9853)
 }
-selected_preset = st.sidebar.selectbox("เลือกพื้นที่ศึกษาด่วน:", list(preset_locations.keys()))
+selected_preset = st.sidebar.selectbox("พื้นที่ศึกษาอ้างอิง:", list(preset_locations.keys()))
 if preset_locations[selected_preset] is not None:
     st.session_state.lat, st.session_state.lon = preset_locations[selected_preset]
     st.session_state.place_name = selected_preset
 
-search_query = st.sidebar.text_input("ค้นหาชื่อสถานที่ / อำเภอ / จังหวัด:", placeholder="เช่น แม่ฟ้าหลวง เชียงราย")
-if st.sidebar.button("🔍 ค้นหาพิกัด"):
+search_query = st.sidebar.text_input("สืบค้นพิกัดภูมิศาสตร์ (ชื่อสถานที่ / อำเภอ / จังหวัด):", placeholder="ระบุชื่อพื้นที่ศึกษา")
+if st.sidebar.button("สืบค้นพิกัดภูมิศาสตร์"):
     if search_query:
         try:
-            geolocator = Nominatim(user_agent="aero_lex_physics_model")
+            geolocator = Nominatim(user_agent="aero_lex_academic_v2")
             location = geolocator.geocode(search_query + " Thailand")
             if location:
                 st.session_state.lat = round(location.latitude, 4)
                 st.session_state.lon = round(location.longitude, 4)
                 st.session_state.place_name = location.address
         except Exception as e:
-            st.sidebar.error(f"ค้นหาไม่สำเร็จ: {e}")
+            st.sidebar.error(f"ข้อผิดพลาดในการสืบค้นพิกัด: {e}")
 
-target_lat = st.sidebar.number_input("ละติจูด (Latitude)", value=st.session_state.lat, format="%.4f")
-target_lon = st.sidebar.number_input("ลองจิจูด (Longitude)", value=st.session_state.lon, format="%.4f")
+target_lat = st.sidebar.number_input("ละติจูด (Latitude, °N)", value=st.session_state.lat, format="%.4f")
+target_lon = st.sidebar.number_input("ลองจิจูด (Longitude, °E)", value=st.session_state.lon, format="%.4f")
 st.session_state.lat = target_lat
 st.session_state.lon = target_lon
 
-st.sidebar.header("🌪️ 2. พารามิเตอร์ฟิสิกส์บรรยากาศ")
+st.sidebar.header("ส่วนที่ 2: พารามิเตอร์ทางฟิสิกส์บรรยากาศ")
 stability_class = st.sidebar.selectbox(
-    "เสถียรภาพบรรยากาศ (Pasquill Stability Class)",
-    options=["A (ไม่เสถียรสูง - แดดจัด ลมอ่อน)", "B (ไม่เสถียรปานกลาง)", "C (ไม่เสถียรเล็กน้อย)", "D (เป็นกลาง - มีเมฆมาก/ลมแรง)", "E (เสถียรเล็กน้อย - ช่วงค่ำ)", "F (เสถียรสูง/อุณหภูมิผกผัน - เช้ามืด)"],
+    "ระดับเสถียรภาพบรรยากาศ (Pasquill-Gifford Class)",
+    options=[
+        "Class A: ไม่เสถียรสูง (รังสีอาทิตย์เข้มข้น ลมอ่อน)",
+        "Class B: ไม่เสถียรปานกลาง",
+        "Class C: ไม่เสถียรเล็กน้อย",
+        "Class D: สภาวะเป็นกลาง (เมฆปกคลุม/ลมปานกลาง)",
+        "Class E: เสถียรเล็กน้อย (ช่วงค่ำ)",
+        "Class F: เสถียรสูง/อุณหภูมิผกผัน (ช่วงเช้ามืด)"
+    ],
     index=3
 )
-stab_code = stability_class[0]
-back_hours = st.sidebar.slider("ระยะเวลาการเคลื่อนที่ของมวลอากาศ (ชม.)", 1, 12, 4)
-use_dem_blocking = st.sidebar.checkbox("เปิดใช้การตัดสิ่งกีดขวางภูมิประเทศ (DEM Terrain Blocking)", value=True)
+stab_code = stability_class.split(":")[0].replace("Class ", "").strip()
+back_hours = st.sidebar.slider("คาบเวลาย้อนรอยมวลอากาศ (ชั่วโมง)", 1, 12, 4)
+use_dem_blocking = st.sidebar.checkbox("เปิดใช้การคัดกรองสิ่งกีดขวางภูมิประเทศ (DEM Blocking)", value=True)
 
-st.sidebar.header("📡 3. ฐานข้อมูล & ดาวเทียม")
-influx_url = st.sidebar.text_input("InfluxDB URL", value=DEFAULT_URL)
-influx_token = st.sidebar.text_input("InfluxDB Token", value=DEFAULT_TOKEN, type="password")
-influx_org = st.sidebar.text_input("Organization", value=DEFAULT_ORG)
-influx_bucket = st.sidebar.text_input("Bucket", value=DEFAULT_BUCKET)
+st.sidebar.header("ส่วนที่ 3: การเชื่อมต่อฐานข้อมูลและดาวเทียม")
+influx_url = st.sidebar.text_input("InfluxDB Endpoint URL", value=DEFAULT_URL)
+influx_token = st.sidebar.text_input("InfluxDB Access Token", value=DEFAULT_TOKEN, type="password")
+influx_org = st.sidebar.text_input("Organization ID", value=DEFAULT_ORG)
+influx_bucket = st.sidebar.text_input("Data Bucket", value=DEFAULT_BUCKET)
 
-if st.sidebar.button("📤 จำลองส่งข้อมูลเซนเซอร์เข้า InfluxDB"):
+if st.sidebar.button("บันทึกข้อมูลจำลองจากสถานีตรวจวัดเข้าฐานข้อมูล"):
     try:
         client = InfluxDBClient(url=influx_url, token=influx_token, org=influx_org)
         write_api = client.write_api(write_options=SYNCHRONOUS)
         point = (
             Point("ground_station")
-            .tag("station_id", "PHYS-ST01")
+            .tag("station_id", "ACAD-ST01")
             .field("pm25", round(random.uniform(75.0, 130.0), 1))
             .field("wind_speed", round(random.uniform(8.0, 20.0), 1))
             .field("wind_dir", round(random.uniform(190.0, 260.0), 1))
@@ -93,14 +152,14 @@ if st.sidebar.button("📤 จำลองส่งข้อมูลเซน�
         )
         write_api.write(bucket=influx_bucket, org=influx_org, record=point)
         client.close()
-        st.sidebar.success("✅ บันทึกข้อมูลลง InfluxDB Cloud สำเร็จ!")
+        st.sidebar.success("บันทึกชุดข้อมูลอนุกรมเวลาลง InfluxDB สำเร็จ")
     except Exception as e:
-        st.sidebar.error(f"ส่งข้อมูลไม่สำเร็จ: {e}")
+        st.sidebar.error(f"การบันทึกข้อมูลล้มเหลว: {e}")
 
-nasa_key = st.sidebar.text_input("NASA MAP_KEY", value=DEFAULT_NASA_KEY, type="password")
-use_mock_hs = st.sidebar.checkbox("ใช้จุดความร้อนจำลอง (สำหรับสาธิตการคำนวณ)", value=True)
+nasa_key = st.sidebar.text_input("NASA FIRMS API Key", value=DEFAULT_NASA_KEY, type="password")
+use_mock_hs = st.sidebar.checkbox("ใช้ชุดข้อมูลจุดความร้อนจำลอง (Simulation Dataset)", value=True)
 
-# --- ฟังก์ชันดึงข้อมูลจาก InfluxDB และ NASA FIRMS ---
+# --- ฟังก์ชันดึงข้อมูล ---
 def fetch_ground_data(url, token, org, bucket):
     try:
         client = InfluxDBClient(url=url, token=token, org=org)
@@ -119,14 +178,14 @@ def fetch_ground_data(url, token, org, bucket):
         client.close()
         if "pm25" in data and "wind_speed" in data and "wind_dir" in data:
             return {
-                "source": "InfluxDB Cloud (ข้อมูลจริงจากสถานี)",
+                "source": "ฐานข้อมูลอนุกรมเวลา InfluxDB Cloud",
                 "pm25": round(float(data["pm25"]), 1),
                 "wind_speed": round(float(data["wind_speed"]), 1),
                 "wind_dir": round(float(data["wind_dir"]), 1)
             }
     except Exception:
         pass
-    return {"source": "ค่าเริ่มต้นระบบ", "pm25": 92.4, "wind_speed": 12.0, "wind_dir": 225.0}
+    return {"source": "ค่าพารามิเตอร์มาตรฐานเริ่มต้น", "pm25": 92.4, "wind_speed": 12.0, "wind_dir": 225.0}
 
 def fetch_hotspots(lat, lon, api_key, force_mock):
     if api_key and not force_mock:
@@ -139,18 +198,17 @@ def fetch_hotspots(lat, lon, api_key, force_mock):
                 if "confidence" in df.columns:
                     df = df[df["confidence"].isin(["n", "h", "nominal", "high"])]
                 if not df.empty:
-                    return df[["latitude", "longitude", "frp"]], "NASA FIRMS VIIRS (ข้อมูลดาวเทียมจริง)"
+                    return df[["latitude", "longitude", "frp"]], "ดาวเทียม NASA FIRMS VIIRS (ข้อมูลจริง)"
                 else:
-                    return pd.DataFrame(columns=["latitude", "longitude", "frp"]), "NASA FIRMS VIIRS (ไม่พบจุดความร้อนจริงในพื้นที่)"
+                    return pd.DataFrame(columns=["latitude", "longitude", "frp"]), "ดาวเทียม NASA FIRMS VIIRS (ไม่พบจุดความร้อนในขอบเขตศึกษา)"
         except Exception:
             pass
     np.random.seed(int(abs(lat * 100)))
     lats = lat + np.random.uniform(-0.32, 0.32, 15)
     lons = lon + np.random.uniform(-0.32, 0.32, 15)
     frp = np.random.uniform(10.0, 65.0, 15)
-    return pd.DataFrame({"latitude": lats, "longitude": lons, "frp": frp}), "ชุดข้อมูลจำลองเชิงฟิสิกส์ (Simulation)"
+    return pd.DataFrame({"latitude": lats, "longitude": lons, "frp": frp}), "ชุดข้อมูลจำลองเชิงฟิสิกส์ (Synthetic Benchmark)"
 
-# --- ฟังก์ชันตรวจสอบความสูงภูมิประเทศ (DEM Elevation Profile) ---
 @st.cache_data(ttl=3600)
 def check_terrain_blocking(lat1, lon1, lat2, lon2, plume_height_m):
     try:
@@ -170,7 +228,6 @@ def check_terrain_blocking(lat1, lon1, lat2, lon2, plume_height_m):
         pass
     return False, 0
 
-# --- แบบจำลองฟิสิกส์บรรยากาศ (Gaussian Plume + Briggs' Buoyancy) ---
 def gaussian_plume_physics(dist_km, crosswind_km, frp_mw, wind_speed_kmh, stab):
     if dist_km <= 0.1:
         return 0.0, 0.0
@@ -205,7 +262,7 @@ def gaussian_plume_physics(dist_km, crosswind_km, frp_mw, wind_speed_kmh, stab):
 ground = fetch_ground_data(influx_url, influx_token, influx_org, influx_bucket)
 hotspots_df, hs_source = fetch_hotspots(target_lat, target_lon, nasa_key, use_mock_hs)
 
-st.info(f"📌 **สถานีรับผลกระทบ (Receptor):** {st.session_state.place_name} (`{target_lat:.4f}, {target_lon:.4f}`) | 🛰️ **แหล่งข้อมูล:** {hs_source}")
+st.markdown(f"**พื้นที่ศึกษาปัจจุบัน:** {st.session_state.place_name} (พิกัด `{target_lat:.4f}°N, {target_lon:.4f}°E`) | **แหล่งข้อมูลจุดความร้อน:** {hs_source} | **แหล่งข้อมูลภาคพื้นดิน:** {ground['source']}")
 
 upwind_bearing = ground["wind_dir"] % 360
 max_radius_km = round(ground["wind_speed"] * back_hours, 2)
@@ -238,40 +295,47 @@ for idx, row in hotspots_df.iterrows():
         pred_pm25, plume_h, blocked, barrier_h, effective_pm25 = 0.0, 0.0, False, 0, 0.0
 
     results.append({
-        "รหัสจุด": f"HS-{idx+1:02d}",
-        "ละติจูด": round(row["latitude"], 4),
-        "ลองจิจูด": round(row["longitude"], 4),
-        "ระยะตามลม x (กม.)": round(max(downwind_x, 0), 2),
-        "ระยะเบี่ยง y (กม.)": round(crosswind_y, 2),
+        "รหัสจุดความร้อน": f"HS-{idx+1:02d}",
+        "ละติจูด (°N)": round(row["latitude"], 4),
+        "ลองจิจูด (°E)": round(row["longitude"], 4),
+        "ระยะตามแนวลม x (km)": round(max(downwind_x, 0), 2),
+        "ระยะเบี่ยงแนวลม y (km)": round(crosswind_y, 2),
         "FRP (MW)": round(row["frp"], 1),
-        "ความสูงควัน H (ม.)": plume_h,
-        "สิ่งกีดขวางภูมิประเทศ": f"ภูเขาสูง +{int(barrier_h)}ม. (บังลม)" if blocked else "ไม่มีสิ่งกีดขวาง",
-        "PM2.5 เชิงทำนาย (µg/m³)": effective_pm25
+        "ความสูงกลุ่มควัน H (m)": plume_h,
+        "สภาพภูมิประเทศ": f"แนวเขาสูง +{int(barrier_h)} m (ขวางกั้น)" if blocked else "เปิดโล่ง (ไม่มีสิ่งกีดขวาง)",
+        "ความเข้มข้นทำนาย (µg/m³)": effective_pm25
     })
 
 res_df = pd.DataFrame(results)
 if not res_df.empty:
-    suspect_df = res_df[res_df["PM2.5 เชิงทำนาย (µg/m³)"] > 0.05].sort_values(by="PM2.5 เชิงทำนาย (µg/m³)", ascending=False).reset_index(drop=True)
+    suspect_df = res_df[res_df["ความเข้มข้นทำนาย (µg/m³)"] > 0.05].sort_values(by="ความเข้มข้นทำนาย (µg/m³)", ascending=False).reset_index(drop=True)
     suspect_df.index += 1
-    suspect_df.index.name = "อันดับ"
+    suspect_df.index.name = "ลำดับที่"
 else:
     suspect_df = pd.DataFrame()
 
-total_predicted_pm25 = round(suspect_df["PM2.5 เชิงทำนาย (µg/m³)"].sum(), 1) if not suspect_df.empty else 0.0
+total_predicted_pm25 = round(suspect_df["ความเข้มข้นทำนาย (µg/m³)"].sum(), 1) if not suspect_df.empty else 0.0
+rel_error = round(abs(ground["pm25"] - total_predicted_pm25) / max(ground["pm25"], 1.0) * 100, 1)
 
+# --- สรุปค่าพารามิเตอร์หลัก ---
+st.subheader("1. สรุปค่าพารามิเตอร์ทางอุตุนิยมวิทยาและผลการคำนวณเชิงแบบจำลอง")
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("PM2.5 วัดได้จริง (Observed)", f"{ground['pm25']} µg/m³")
-c2.metric("PM2.5 ทำนายจากแบบจำลอง (Predicted)", f"{total_predicted_pm25} µg/m³", f"เสถียรภาพ Class {stab_code}")
-c3.metric("ความเร็วลม / ทิศต้นลม", f"{ground['wind_speed']} km/h", f"ทิศ {upwind_bearing}°")
-c4.metric("แหล่งกำเนิดที่มีนัยสำคัญ", f"{len(suspect_df)} จุด", f"รัศมีทำการ {max_radius_km} กม.")
+c1.metric("ความเข้มข้นตรวจวัดจริง (C_obs)", f"{ground['pm25']} µg/m³")
+c2.metric("ความเข้มข้นเชิงทำนายรวม (C_pred)", f"{total_predicted_pm25} µg/m³", f"ความคลาดเคลื่อนสัมพัทธ์ {rel_error}%")
+c3.metric("เวกเตอร์ลมต้นทาง (Wind Vector)", f"{ground['wind_speed']} km/h", f"มุมทิศ {upwind_bearing}° (Class {stab_code})")
+c4.metric("จำนวนแหล่งกำเนิดที่มีนัยสำคัญ", f"{len(suspect_df)} จุด", f"ขอบเขตการเคลื่อนที่ {max_radius_km} km")
 
 st.divider()
 col_map, col_tbl = st.columns([1.15, 1.15])
 
 with col_map:
-    st.subheader("แผนที่การแพร่กระจายมวลอากาศ (Gaussian Plume Trajectory)")
-    m = folium.Map(location=[target_lat, target_lon], zoom_start=10)
-    folium.Marker([target_lat, target_lon], popup="สถานีตรวจวัด (Receptor)", icon=folium.Icon(color="blue", icon="home")).add_to(m)
+    st.subheader("2. แบบจำลองเชิงพื้นที่และการแพร่กระจายของกลุ่มควัน")
+    m = folium.Map(location=[target_lat, target_lon], zoom_start=10, tiles="CartoDB positron")
+    folium.Marker(
+        [target_lat, target_lon],
+        popup="สถานีตรวจวัดภาคพื้นดิน (Receptor)",
+        icon=folium.Icon(color="darkblue", icon="info-sign")
+    ).add_to(m)
     
     cone_pts = [[target_lat, target_lon]]
     for deg in np.linspace(upwind_bearing - 30, upwind_bearing + 30, 30):
@@ -280,67 +344,70 @@ with col_map:
         d_lon = (max_radius_km / (111.32 * np.cos(np.radians(target_lat)))) * np.sin(rad)
         cone_pts.append([target_lat + d_lat, target_lon + d_lon])
     cone_pts.append([target_lat, target_lon])
-    folium.Polygon(locations=cone_pts, color="orange", fill=True, fill_opacity=0.25).add_to(m)
+    folium.Polygon(locations=cone_pts, color="#B7791F", weight=1.5, fill=True, fill_opacity=0.2).add_to(m)
     
     if not res_df.empty:
         for _, r in res_df.iterrows():
-            is_active = r["PM2.5 เชิงทำนาย (µg/m³)"] > 0.05
-            is_blocked = "บังลม" in r["สิ่งกีดขวางภูมิประเทศ"]
-            color = "red" if is_active else ("purple" if is_blocked else "gray")
+            is_active = r["ความเข้มข้นทำนาย (µg/m³)"] > 0.05
+            is_blocked = "ขวางกั้น" in r["สภาพภูมิประเทศ"]
+            color = "#C53030" if is_active else ("#6B46C1" if is_blocked else "#718096")
             folium.CircleMarker(
-                location=[r["ละติจูด"], r["ลองจิจูด"]],
-                radius=8 if is_active else 5,
+                location=[r["ละติจูด (°N)"], r["ลองจิจูด (°E)"]],
+                radius=7 if is_active else 4.5,
                 color=color,
-                fill=True, fill_opacity=0.9,
-                popup=f"{r['รหัสจุด']} | PM2.5 ทำนาย: {r['PM2.5 เชิงทำนาย (µg/m³)']} µg/m³ | {r['สิ่งกีดขวางภูมิประเทศ']}"
+                fill=True, fill_opacity=0.85,
+                popup=f"{r['รหัสจุดความร้อน']} | C_pred: {r['ความเข้มข้นทำนาย (µg/m³)']} µg/m³ | {r['สภาพภูมิประเทศ']}"
             ).add_to(m)
             
-    map_data = st_folium(m, width=620, height=450)
+    map_data = st_folium(m, width=620, height=440)
+    st.caption("ภาพที่ 1: การกระจายตัวเชิงพื้นที่ของจุดความร้อน (สีแดง: แหล่งกำเนิดที่มีผลกระทบ, สีม่วง: ถูกแนวเขาขวางกั้น, สีเทา: นอกแนวกระแสลม) คลิกบนแผนที่เพื่อกำหนดพิกัดจุดตรวจวัดใหม่")
     if map_data and map_data.get("last_clicked"):
         clicked_lat = round(map_data["last_clicked"]["lat"], 4)
         clicked_lon = round(map_data["last_clicked"]["lng"], 4)
         if clicked_lat != st.session_state.lat or clicked_lon != st.session_state.lon:
             st.session_state.lat = clicked_lat
             st.session_state.lon = clicked_lon
-            st.session_state.place_name = "พิกัดที่เลือกจากแผนที่"
+            st.session_state.place_name = "พิกัดกำหนดเองจากแผนที่เชิงพื้นที่"
             st.rerun()
 
 with col_tbl:
-    st.subheader("ตารางวิเคราะห์เชิงปริมาณตามหลักฟิสิกส์บรรยากาศ")
+    st.subheader("3. ผลการวิเคราะห์เชิงปริมาณและจัดลำดับความสำคัญ")
     if not suspect_df.empty:
         st.dataframe(
-            suspect_df[["รหัสจุด", "ระยะตามลม x (กม.)", "FRP (MW)", "ความสูงควัน H (ม.)", "สิ่งกีดขวางภูมิประเทศ", "PM2.5 เชิงทำนาย (µg/m³)"]],
+            suspect_df[["รหัสจุดความร้อน", "ระยะตามแนวลม x (km)", "FRP (MW)", "ความสูงกลุ่มควัน H (m)", "สภาพภูมิประเทศ", "ความเข้มข้นทำนาย (µg/m³)"]],
             use_container_width=True
         )
+        st.caption("ตารางที่ 1: ผลการคำนวณค่าความเข้มข้นฝุ่นละอองขนาดเล็ก ณ จุดรับผลกระทบ จำแนกตามแหล่งกำเนิดความร้อน")
         
         raw_str = suspect_df.to_csv() + datetime.now().strftime("%Y-%m-%d %H:%M")
         hash_val = hashlib.sha256(raw_str.encode()).hexdigest()
-        st.success(f"**รหัสรับรองความถูกต้องข้อมูล (SHA-256):**\n`{hash_val}`")
+        st.info(f"**รหัสแฮชยืนยันความสมบูรณ์ของชุดข้อมูล (SHA-256 Checksum):**\n`{hash_val}`")
         
         st.download_button(
-            label="📥 ดาวน์โหลดผลการคำนวณทางฟิสิกส์ (CSV)",
+            label="ส่งออกตารางผลการวิเคราะห์เชิงปริมาณ (CSV)",
             data=suspect_df.to_csv().encode("utf-8-sig"),
-            file_name=f"aerolex_physics_{datetime.now().strftime('%Y%m%d')}.csv",
+            file_name=f"aerolex_quantitative_report_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv"
         )
     else:
-        st.warning("ไม่พบแหล่งกำเนิดที่ส่งผลกระทบถึงสถานีตรวจวัด (หรือถูกแนวเทือกเขาขวางกั้นทั้งหมด)")
-
-with st.expander("📐 ดูสมการฟิสิกส์และตัวแปรที่ใช้ในแบบจำลอง (สำหรับอ้างอิงในรายงาน)"):
-    st.markdown(r"""
-    1. **Gaussian Plume Dispersion Equation (ระดับพื้นดิน $z=2\text{ m}$):**
-       $$C(x, y, z) = \frac{Q}{2\pi u \sigma_y \sigma_z} \exp\left(-\frac{y^2}{2\sigma_y^2}\right) \left[ \exp\left(-\frac{(z - H)^2}{2\sigma_z^2}\right) + \exp\left(-\frac{(z + H)^2}{2\sigma_z^2}\right) \right]$$
-    2. **Briggs' Thermal Plume Rise ($\Delta h$):**
-       $$\Delta h = \frac{1.6 F^{1/3} x^{2/3}}{u}, \quad F = 8.9 \times \text{FRP}$$
-    3. **สัญลักษณ์สีบนแผนที่:**
-       * 🔴 **สีแดง:** แหล่งกำเนิดที่ส่งผลกระทบถึงสถานีตรวจวัด
-       * 🟣 **สีม่วง:** จุดความร้อนที่อยู่ในทิศต้นลม แต่ถูกแนวเทือกเขาขวางกั้น (Orographic Blocking)
-       * ⚪ **สีเทา:** จุดความร้อนนอกแนวกระแสลม
-    """)
+        st.warning("ไม่พบแหล่งกำเนิดความร้อนที่มีนัยสำคัญทางสถิติในแนวกระแสลมช่วงเวลาที่กำหนด")
 
 st.divider()
-st.subheader("🗄️ ดาวน์โหลดประวัติข้อมูลตรวจวัดภาคพื้นดิน (InfluxDB)")
-if st.button("เตรียมไฟล์ประวัติข้อมูลย้อนหลัง 7 วัน"):
+st.subheader("4. ระเบียบวิธีวิจัยและสมการทางคณิตศาสตร์ที่ใช้อ้างอิง")
+st.markdown(r"""
+1. **แบบจำลองการแพร่กระจายแบบเกาส์เซียน (Gaussian Plume Dispersion Model):** คำนวณความเข้มข้นของมวลสารมลพิษ $C(x, y, z)$ ณ ระดับความสูงจุดตรวจวัด $z = 2.0\text{ m}$
+   $$C(x, y, z) = \frac{Q}{2\pi u \sigma_y \sigma_z} \exp\left(-\frac{y^2}{2\sigma_y^2}\right) \left[ \exp\left(-\frac{(z - H)^2}{2\sigma_z^2}\right) + \exp\left(-\frac{(z + H)^2}{2\sigma_z^2}\right) \right]$$
+   โดยกำหนดให้อัตราการปลดปล่อยมวลฝุ่น $Q$ แปรผันตรงกับพลังงานการแผ่รังสีความร้อนจากไฟ ($\text{FRP}$) และค่าสัมประสิทธิ์การฟุ้งกระจาย $\sigma_y, \sigma_z$ คำนวณตามเกณฑ์เสถียรภาพบรรยากาศของ Pasquill-Gifford
+
+2. **สมการแรงลอยตัวทางความร้อนของบริกส์ (Briggs' Thermal Plume Rise):** คำนวณระยะยกตัวของกลุ่มควัน $\Delta h$ เนื่องจากความแตกต่างของความหนาแน่นอากาศจากความร้อน
+   $$\Delta h = \frac{1.6 F^{1/3} x^{2/3}}{u}, \quad F = 8.9 \times \text{FRP}$$
+
+3. **การวิเคราะห์สิ่งกีดขวางทางภูมิประเทศ (Orographic Blocking Criterion):** ตรวจสอบความสูงภูมิประเทศตามแนวตัดขวาง (Elevation Profile) จากข้อมูล DEM โดยกำหนดเงื่อนไขการขวางกั้นเมื่อระดับความสูงสันเขา $Z_{\text{terrain}} > (Z_{\text{source}} + H + 150\text{ m})$
+""")
+
+st.divider()
+st.subheader("5. คลังข้อมูลอนุกรมเวลาภาคพื้นดิน (InfluxDB Time-Series Archive)")
+if st.button("ประมวลผลชุดข้อมูลอนุกรมเวลาย้อนหลัง 7 วัน"):
     try:
         client = InfluxDBClient(url=influx_url, token=influx_token, org=influx_org)
         query_api = client.query_api()
@@ -355,12 +422,12 @@ if st.button("เตรียมไฟล์ประวัติข้อมู
         if not df_hist.empty:
             cols = [c for c in ["_time", "station_id", "pm25", "wind_speed", "wind_dir"] if c in df_hist.columns]
             st.download_button(
-                label="คลิกเพื่อดาวน์โหลดไฟล์ CSV (ข้อมูลจาก InfluxDB)",
+                label="ดาวน์โหลดชุดข้อมูลอนุกรมเวลา (CSV)",
                 data=df_hist[cols].to_csv(index=False).encode("utf-8-sig"),
-                file_name=f"influxdb_history_{datetime.now().strftime('%Y%m%d')}.csv",
+                file_name=f"influxdb_timeseries_{datetime.now().strftime('%Y%m%d')}.csv",
                 mime="text/csv"
             )
         else:
-            st.info("ยังไม่มีข้อมูลประวัติในฐานข้อมูล กดปุ่มส่งข้อมูลด้านซ้ายเพื่อสร้างข้อมูลตัวอย่างก่อนได้ครับ")
+            st.info("ไม่พบระเบียนข้อมูลในฐานข้อมูลอนุกรมเวลาช่วง 7 วันที่ผ่านมา")
     except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
+        st.error(f"ข้อผิดพลาดในการสืบค้นฐานข้อมูล: {e}")
