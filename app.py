@@ -17,10 +17,23 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- บังคับธีมสว่างแบบเอกสารวิจัย (Light Academic Theme) และฟอนต์ Sarabun ---
+# --- บังคับธีมสว่างแบบเอกสารวิจัย (Light Academic Theme) และฟอนต์ TH Sarabun New ---
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Sarabun:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap');
+    @font-face {
+        font-family: 'THSarabunNew';
+        src: url('https://cdn.jsdelivr.net/gh/lazywasabi/thai-web-fonts@7/fonts/THSarabunNew/THSarabunNew.woff2') format('woff2'),
+             url('https://cdn.jsdelivr.net/gh/lazywasabi/thai-web-fonts@7/fonts/THSarabunNew/THSarabunNew.woff') format('woff');
+        font-weight: normal;
+        font-style: normal;
+    }
+    @font-face {
+        font-family: 'THSarabunNew';
+        src: url('https://cdn.jsdelivr.net/gh/lazywasabi/thai-web-fonts@7/fonts/THSarabunNew/THSarabunNew-Bold.woff2') format('woff2'),
+             url('https://cdn.jsdelivr.net/gh/lazywasabi/thai-web-fonts@7/fonts/THSarabunNew/THSarabunNew-Bold.woff') format('woff');
+        font-weight: bold;
+        font-style: normal;
+    }
 
     /* บังคับพื้นหลังสีขาวและตัวอักษรสีเข้มทั้งระบบ */
     .stApp {
@@ -34,8 +47,14 @@ st.markdown("""
     }
 
     html, body, .stApp, p, h1, h2, h3, h4, h5, h6, label, input, select, textarea, button, .stMarkdown, .stDataFrame, [data-testid="stMetricValue"], [data-testid="stMetricLabel"] {
-        font-family: 'Sarabun', sans-serif !important;
+        font-family: 'THSarabunNew', 'TH Sarabun New', 'TH SarabunPSK', sans-serif !important;
         color: #1E293B !important;
+    }
+
+    /* ปรับขนาดตัวอักษรให้เหมาะกับสัดส่วนของ TH Sarabun */
+    p, label, .stMarkdown, li {
+        font-size: 1.25rem !important;
+        line-height: 1.5 !important;
     }
 
     /* ส่วนหัวแบบรายงานวิจัย */
@@ -46,17 +65,17 @@ st.markdown("""
         margin-bottom: 1.2rem;
     }
     .research-meta {
-        font-size: 0.88rem;
+        font-size: 1.1rem;
         color: #475569 !important;
         letter-spacing: 0.02em;
-        margin-bottom: 0.3rem;
-        font-weight: 500;
+        margin-bottom: 0.25rem;
+        font-weight: bold;
     }
     .research-title {
-        font-size: 1.75rem;
-        font-weight: 700;
+        font-size: 2.35rem;
+        font-weight: bold;
         color: #0F172A !important;
-        line-height: 1.35;
+        line-height: 1.25;
         margin: 0;
     }
 
@@ -67,17 +86,17 @@ st.markdown("""
         border-left: 4px solid #1E3A8A;
         padding: 1rem 1.25rem;
         margin-bottom: 1.5rem;
-        font-size: 0.96rem;
-        line-height: 1.7;
+        font-size: 1.28rem;
+        line-height: 1.55;
         color: #334155 !important;
     }
 
     h2, h3 {
         color: #1E3A8A !important;
-        font-weight: 700 !important;
-        font-size: 1.2rem !important;
+        font-weight: bold !important;
+        font-size: 1.65rem !important;
         border-bottom: 1px solid #E2E8F0;
-        padding-bottom: 0.35rem;
+        padding-bottom: 0.3rem;
         margin-top: 1.2rem !important;
     }
 
@@ -89,9 +108,13 @@ st.markdown("""
         padding: 0.8rem 1rem !important;
         box-shadow: none !important;
     }
+    [data-testid="stMetricLabel"] p {
+        font-size: 1.2rem !important;
+        font-weight: bold !important;
+    }
     [data-testid="stMetricValue"] {
-        font-size: 1.55rem !important;
-        font-weight: 700 !important;
+        font-size: 1.95rem !important;
+        font-weight: bold !important;
         color: #0F172A !important;
     }
 
@@ -101,11 +124,13 @@ st.markdown("""
         color: #FFFFFF !important;
         border: none !important;
         border-radius: 3px !important;
-        font-weight: 500 !important;
+        font-weight: bold !important;
+        font-size: 1.25rem !important;
         padding: 0.45rem 1rem !important;
     }
     .stButton > button p, .stDownloadButton > button p {
         color: #FFFFFF !important;
+        font-size: 1.25rem !important;
     }
     .stButton > button:hover, .stDownloadButton > button:hover {
         background-color: #172554 !important;
@@ -116,6 +141,7 @@ st.markdown("""
         background-color: #FFFFFF !important;
         border-color: #CBD5E1 !important;
         color: #1E293B !important;
+        font-size: 1.2rem !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -164,7 +190,7 @@ search_query = st.sidebar.text_input("สืบค้นพิกัดภูม
 if st.sidebar.button("สืบค้นพิกัด"):
     if search_query:
         try:
-            geolocator = Nominatim(user_agent="aero_lex_academic_v7")
+            geolocator = Nominatim(user_agent="aero_lex_academic_v8")
             location = geolocator.geocode(search_query + " Thailand")
             if location:
                 st.session_state.lat = round(location.latitude, 4)
@@ -512,7 +538,7 @@ with col_tbl:
         
         raw_str = suspect_df.to_csv() + datetime.now().strftime("%Y-%m-%d %H:%M")
         hash_val = hashlib.sha256(raw_str.encode()).hexdigest()
-        st.markdown(f"<div style='background:#F8FAFC; border:1px solid #CBD5E1; padding:0.75rem; font-size:0.85rem; margin-bottom:0.75rem;'><strong>รหัสตรวจสอบความถูกต้องของข้อมูล (SHA-256 Checksum):</strong><br><code>{hash_val}</code></div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='background:#F8FAFC; border:1px solid #CBD5E1; padding:0.75rem; font-size:1.1rem; margin-bottom:0.75rem;'><strong>รหัสตรวจสอบความถูกต้องของข้อมูล (SHA-256 Checksum):</strong><br><code>{hash_val}</code></div>", unsafe_allow_html=True)
         
         st.download_button(
             label="ส่งออกตารางผลการวิเคราะห์ (CSV)",
@@ -521,7 +547,7 @@ with col_tbl:
             mime="text/csv"
         )
     else:
-        st.markdown("<div style='background:#FEF2F2; border:1px solid #FECACA; color:#991B1B; padding:0.85rem; font-size:0.95rem;'>ไม่พบแหล่งกำเนิดความร้อนที่มีนัยสำคัญทางสถิติในแนวกระแสลมช่วงเวลาที่กำหนด</div>", unsafe_allow_html=True)
+        st.markdown("<div style='background:#FEF2F2; border:1px solid #FECACA; color:#991B1B; padding:0.85rem; font-size:1.2rem;'>ไม่พบแหล่งกำเนิดความร้อนที่มีนัยสำคัญทางสถิติในแนวกระแสลมช่วงเวลาที่กำหนด</div>", unsafe_allow_html=True)
 
 st.subheader("4. ระเบียบวิธีวิจัยและสมการทางคณิตศาสตร์ที่ใช้อ้างอิง")
 st.markdown(r"""
@@ -557,12 +583,12 @@ if st.button("สืบค้นชุดข้อมูลอนุกรมเ
                 mime="text/csv"
             )
         else:
-            st.markdown("<div style='background:#F8FAFC; border:1px solid #CBD5E1; padding:0.75rem; font-size:0.92rem;'>ไม่พบระเบียนข้อมูลในฐานข้อมูลอนุกรมเวลาช่วง 7 วันที่ผ่านมา</div>", unsafe_allow_html=True)
+            st.markdown("<div style='background:#F8FAFC; border:1px solid #CBD5E1; padding:0.75rem; font-size:1.15rem;'>ไม่พบระเบียนข้อมูลในฐานข้อมูลอนุกรมเวลาช่วง 7 วันที่ผ่านมา</div>", unsafe_allow_html=True)
     except Exception as e:
         st.error(f"ข้อผิดพลาดในการสืบค้นฐานข้อมูล: {e}")
 
 st.markdown("""
-<div style="margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid #CBD5E1; font-size: 0.85rem; color: #64748B; line-height: 1.6;">
+<div style="margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid #CBD5E1; font-size: 1.1rem; color: #64748B; line-height: 1.55;">
     <strong>เอกสารอ้างอิงทางวิชาการ (References):</strong><br>
     [1] Pasquill, F. (1961). The estimation of the dispersion of windborne material. <em>Meteorological Magazine</em>, 90, 33–49.<br>
     [2] Briggs, G. A. (1969). <em>Plume Rise</em>. U.S. Atomic Energy Commission Critical Review Series, TID-25075.<br>
